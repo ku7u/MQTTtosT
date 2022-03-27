@@ -1,99 +1,128 @@
 
-
 /*
+MIT License
+
+Copyright (c) 2022 George Hofmann
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
   Pin assignments:
    01  TX0
    02  switch for configuration via bluetooth
    03  RX0
    04  GPIO
    05  GPIO
-   12  det #1 E
-   13  det #1 W
-   14  det #2 E
-   15  det #2 W
-   16  det #3 E
-   17  det #3 W
-   18  det #4 E
-   19  det #4 W
-   21  det #5 E
-   22  det #5 W
-   23  det #6 E
-   25  det #6 W
-   26  det #7 E
-   27  det #7 W
-   32  det #8 E
-   33  det #8 W
-   34  input only, external pullup required
-   35  input only, external pullup required
-   36  input only, external pullup required
-   39  input only, external pullup required
+   12  A+ stepper 1
+   13  A- stepper 1
+   14  B+ stepper 1
+   15  B- stepper 1
+   16  A+ stepper 2
+   17  A- stepper 2
+   18  B+ stepper 2
+   19  B- stepper 2
+   21  A+ stepper 3
+   22  A- stepper 3
+   23  B+ stepper 3
+   25  B- stepper 3
+   26  A+ stepper 4
+   27  A- stepper 4
+   32  B+ stepper 4
+   33  B- stepper 4
+   34  switch 1 requires pullup on board
+   35  switch 2 requires pullup on board
+   36  switch 3 requires pullup on board
+   39  switch 4 requires pullup on board
    */
 
+#include <iostream>>
 #include <Preferences.h>
 #include <PubSubClient.h>
 #include "WiFi.h"
 #include <BluetoothSerial.h>
-#include "bod.h"
+#include "StepperMRTO.h"
 //#define testing
 
 using namespace std;
 
-// stringstream ss;
-
 Preferences myPrefs;
-char *deviceSpace[] = {"d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8"};
+char *deviceSpace[] = {"d1", "d2", "d3", "d4"};
 
-// const char *ssid = "Emmy Network";
-// const char *password = "Rutabaga7";
-// const char *mqtt_server = "192.168.0.109";
-
+// wifi
 WiFiClient espClient;
 String SSID;
 String wifiPassword;
 
+// mqtt
 String mqttServer;
 String mqttNode;
+String mqttChannel;
+char mqttchannel[50];
+String turnoutTopic;
+// char turnoutTopic[100];
 PubSubClient client(espClient);
 
+// Bluetooth
 BluetoothSerial BTSerial;
 String BTname;
 String BTpassword;
 String pwCandidate;
 String pwtest;
 
-// constants and variables - detectors
-const uint8_t numDevices = 8;
-const byte WEST = 0;
-const byte EAST = 1;
-// String detName[numDevices];
+String nodeName;
 
-// detector pins
-const uint16_t pinDet1W = 13;
-const uint16_t pinDet1E = 12;
-const uint16_t pinDet2W = 15;
-const uint16_t pinDet2E = 14;
-const uint16_t pinDet3W = 17;
-const uint16_t pinDet3E = 16;
-const uint16_t pinDet4W = 19;
-const uint16_t pinDet4E = 18;
-const uint16_t pinDet5W = 22;
-const uint16_t pinDet5E = 21;
-const uint16_t pinDet6W = 25;
-const uint16_t pinDet6E = 23;
-const uint16_t pinDet7W = 27;
-const uint16_t pinDet7E = 26;
-const uint16_t pinDet8W = 33;
-const uint16_t pinDet8E = 32;
+// constants and variables - turnouts
 
-detector bod[] =
-    {detector(pinDet1W, pinDet1E),
-     detector(pinDet2W, pinDet2E),
-     detector(pinDet3W, pinDet3E),
-     detector(pinDet4W, pinDet4E),
-     detector(pinDet5W, pinDet5E),
-     detector(pinDet6W, pinDet6E),
-     detector(pinDet7W, pinDet7E),
-     detector(pinDet8W, pinDet8E)};
+uint16_t const numDevices = 4;
+String devName[numDevices];             // TBD
+uint16_t const stepsPerRevolution = 20; // number of steps per revolution
+uint16_t const NOMINAL_SPEED = 1000;
+uint16_t const NOMINAL_STROKE = 500;
+uint16_t const NOMINAL_TORQUE_INTERVAL = 1000;
+
+// motor pins
+uint16_t const APlus1Pin = 12;
+uint16_t const AMinus1Pin = 13;
+uint16_t const BPlus1Pin = 14;
+uint16_t const BMinus1Pin = 15;
+uint16_t const APlus2Pin = 16;
+uint16_t const AMinus2Pin = 17;
+uint16_t const BPlus2Pin = 18;
+uint16_t const BMinus2Pin = 19;
+uint16_t const APlus3Pin = 21;
+uint16_t const AMinus3Pin = 22;
+uint16_t const BPlus3Pin = 23;
+uint16_t const BMinus3Pin = 25;
+uint16_t const APlus4Pin = 26;
+uint16_t const AMinus4Pin = 27;
+uint16_t const BPlus4Pin = 32;
+uint16_t const BMinus4Pin = 33;
+
+StepperMRTO myStepper[] =
+    {StepperMRTO(stepsPerRevolution, APlus1Pin, AMinus1Pin, BPlus1Pin, BMinus1Pin),
+     StepperMRTO(stepsPerRevolution, APlus2Pin, AMinus2Pin, BPlus2Pin, BMinus2Pin),
+     StepperMRTO(stepsPerRevolution, APlus3Pin, AMinus3Pin, BPlus3Pin, BMinus3Pin),
+     StepperMRTO(stepsPerRevolution, APlus4Pin, AMinus4Pin, BPlus4Pin, BMinus4Pin)};
+
+// switch pins for manual control, these must have pullup resistors
+uint16_t const switchPin[4] = {34, 35, 36, 39};
+
+bool returnToMenu = false; // for actuation feature in menu TBD
 
 /*****************************************************************************/
 void setup()
@@ -101,15 +130,19 @@ void setup()
   byte myVal;
 
   Serial.begin(115200);
-  // pinMode(2, INPUT_PULLUP); // this is used for resetting Bluetooth
+  pinMode(2, INPUT_PULLUP); // this is used for resetting Bluetooth
 
+  // get the stored configuration values, defaults are the second parameter in the list
   myPrefs.begin("general");
-  BTname = myPrefs.getString("BTname", "CANtosNode");
+  nodeName = myPrefs.getString("nodename", "MQTTtosNode");
+  // BTname = myPrefs.getString("BTname", "MQTTtosNode");
+  BTname = nodeName;
   BTpassword = myPrefs.getString("password", "IGNORE");
   SSID = myPrefs.getString("SSID", "none");
   wifiPassword = myPrefs.getString("wifipassword", "none");
   mqttServer = myPrefs.getString("mqttserver", "none");
-  mqttNode = myPrefs.getString("mqttnode", "noname");
+  // strcpy(mqttchannel, myPrefs.getString("mqttchannel", "trains/").c_str());
+  mqttChannel = myPrefs.getString("mqttchannel", "trains/");
   myPrefs.end();
 
   // wifiPassword = "Bogus";
@@ -117,29 +150,54 @@ void setup()
   // Bluetooth
   // myPrefs.begin("general");
   // if (myPrefs.getBool("BTon", true)) TBD always turn on BT on reboot?
-  BTSerial.begin(BTname);
+  BTSerial.begin(nodeName);
   // myPrefs.end();
 
   // WiFi
   setup_wifi();
 
-  // mqtt
+  // MQTT
   char mqtt_server[mqttServer.length() + 1]; // converting from string to char array required for client parameter
   strcpy(mqtt_server, mqttServer.c_str());
   uint8_t ip[4];
   sscanf(mqtt_server, "%u.%u.%u.%u", &ip[0], &ip[1], &ip[2], &ip[3]);
   client.setServer(ip, 1883);
+  // client.setSocketTimeout(60);
+  client.setKeepAlive(60);
   client.setCallback(callback);
 
-  // read the parameters from memory and apply to objects
+  // TO specific
+  // strcpy(turnoutTopic, mqttchannel);
+  // turnoutTopic = string(mqttchannel) + "track/turnout";
+  turnoutTopic = mqttChannel + "track/turnout";
+  // strcat(turnoutTopic, "track/turnout/");
+
+  // read the stored values for speed, throw, torque and reversed
+  // send those values to the stepper objects
   for (int i = 0; i < numDevices; i++)
   {
-    myPrefs.begin(deviceSpace[i], true);
-    bod[i].setBlockWest(myPrefs.getUShort("blockWest", 0)); // TBD the types
-    bod[i].setBlockEast(myPrefs.getUShort("blockEast", 0));
-    bod[i].setWestKeeper(myPrefs.getBool("westkeeper", false));
-    bod[i].setEastKeeper(myPrefs.getBool("eastkeeper", false));
-    // detName[i] = myPrefs.getString("name", "noname");
+    myPrefs.begin(deviceSpace[i]);
+    devName[i] = myPrefs.getString("name", "noname");
+
+    // set the rotational speed using rpm as parameter, defaults to NOMINAL_SPEED
+    myStepper[i].setSpeed(myPrefs.getUShort("speed", NOMINAL_SPEED));
+
+    // set the length of the stroke, defaults to NOMINAL_STROKE
+    // nominal value of 500 should be enough for most turnouts
+    // it could be made less through experimentation
+    myStepper[i].setStrokeSteps(myPrefs.getUShort("throw", NOMINAL_STROKE));
+
+    // limit the torque, defaults to NOMINAL_TORQUE_INTERVAL
+    // this defines the maximum time in microseconds that current will be allowed to flow in each step
+    // the default is 1000, a larger number provides more torque but consumes more current
+    // at 1000 rpm the step length is 3000 ms for a 20 step/revolution motor
+    myStepper[i].setTorqueLimit(myPrefs.getUShort("force", NOMINAL_TORQUE_INTERVAL));
+
+    // configure the direction, defaults to false (non-reversed)
+    // design assumes device is installed on the closed side of turnout and that turnout is closed
+    // the first movement after startup will be to pull the throwbar thus throwing the track switch
+    // setting reversed to true will set motion to the opposite of above as required if machine is located on diverging side
+    myStepper[i].setReversed(myPrefs.getBool("reversed", false));
     myPrefs.end();
   }
 }
@@ -189,9 +247,60 @@ void setup_wifi()
       {
         flushSerialIn();
         if (pwCheck())
-          setCredentials();
-        // the device will be rebooted at this point after the operator resets credentials
+          configure();
       }
+    }
+  }
+}
+
+/*****************************************************************************/
+void reconnect()
+{
+  bool flasher = false;
+
+  char mqtt_node[nodeName.length() + 1];
+  strcpy(mqtt_node, nodeName.c_str());
+
+  // Loop until we're reconnected TBD change all Serial to BTSerial (maybe)
+  while (!client.connected())
+  {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (client.connect(mqtt_node))
+    {
+      Serial.println("connected");
+      char subscription[50];
+      // accept all <channel>/track/turnout/ topics
+      // they will be of the form <JMRI channel>/track/turnout/<JMRI system name> THROWN/CLOSED
+      // strcpy(subscription, mqttchannel);
+      strcpy(subscription, mqttChannel.c_str());
+      strcat(subscription, "track/turnout/+");
+      client.subscribe(subscription, 1);
+    }
+    else
+    {
+      pinMode(2, OUTPUT);
+      Serial.print("Failed to connect to ");
+      Serial.print(mqttServer);
+      Serial.print(" Response was ");
+      Serial.println(client.state());
+      Serial.println("Looping every 2 seconds. MQTT server must be configured using BT menu");
+      flasher = !flasher;
+      Serial.println(flasher);
+      if (flasher == true)
+        digitalWrite(2, HIGH);
+      else
+        digitalWrite(2, LOW);
+
+      // Wait 2 seconds before retrying
+      if (BTSerial.available())
+      {
+        flushSerialIn();
+        if (pwCheck())
+          configure();
+        // the device will be rebooted at this point after the operator resets mqtt server
+      }
+      delay(2000);
     }
   }
 }
@@ -203,7 +312,7 @@ void loop()
   // use this if Bluetooth has been disabled from the menu (to prevent hackers in the house)
   // or if password was forgotten
   // TBD maybe this should go in setup, use first switch pin to save pins
-  // if (digitalRead(2) == LOW) //TBD fix this
+  // if (digitalRead(2) == LOW) //TBD fix this, does not work as expected
   // {
   //   BTSerial.begin();
   //   myPrefs.begin("general", false);
@@ -226,224 +335,105 @@ void loop()
       configure();
   }
 
-  checkDetectors();
+  // checkSwitches(); TBD need pullups for this to work
+
+  // if (runSteppers() && returnToMenu) // runSteppers returns true at end of throw, check if throw was commanded from menu
+  // {
+  //   returnToMenu = false; // we came here from the menu 'A' command, return to menu
+  //   configure();
+  // }
 }
 
 /*****************************************************************************/
 // this is a callback from the mqtt object, made when a subscribed message comes in
 void callback(char *topic, byte *message, unsigned int length)
 {
-  //   Serial.print("Message arrived on topic: ");
-  //   Serial.print(topic);
-  //   Serial.print(". Message: ");
-  // string messageTemp;
-  uint16_t blockID;
+  String topicString;
+  String lastPart;
+  char messChars[50];
+
+  topicString = String(topic);
 
   for (int i = 0; i < length; i++)
-  {
-    // Serial.print((char)message[i]);
-    // messageTemp += (char)message[i];
-  }
-  //   Serial.println();
+    messChars[i] = (char)message[i];
+  messChars[length] = '\0';
 
-  if (String(topic) == "mqmtTOS/looseBlock/increase")
-  {
-    // call processDetectors with the blockID and increase
-    uint8_t _blockID = message[0];
-    procDetectors((byte)_blockID, true);
-    BTSerial.println("I processed my own message!");
-  }
+  if (turnoutTopic.equals(topicString.substring(0, topicString.lastIndexOf('/') + 1)))
+    return;
 
-  if (String(topic) == "mqmtTOS/looseBlock/decrease")
-  {
-    // call processDetectors with the blockID and decrease
-    uint8_t _blockID = message[0];
-    procDetectors((byte)blockID, false);
-    BTSerial.println("I processed my own message!");
-  }
-}
-
-/*****************************************************************************/
-void reconnect()
-{
-  bool flasher = false;
-
-  char mqtt_node[mqttNode.length() + 1];
-  strcpy(mqtt_node, mqttNode.c_str());
-
-  // Loop until we're reconnected TBD change all Serial to BTSerial (maybe)
-  while (!client.connected())
-  {
-    Serial.print("Attempting MQTT connection...");
-    // Attempt to connect
-    // if (client.connect("mqmtTOS")) // TBD this must be unique among nodes
-    if (client.connect(mqtt_node)) // TBD this must be unique among nodes
-    {
-      Serial.println("connected");
-      client.subscribe("mqmtTOS/looseBlock/#"); // accept all mqmtTOS/looseBlock topics
-    }
-    else
-    {
-      pinMode(2, OUTPUT);
-      Serial.print("Failed to connect to ");
-      Serial.print(mqttServer);
-      Serial.print(" Response was ");
-      Serial.println(client.state());
-      Serial.println("Looping every 2 seconds. MQTT server must be configured using BT menu");
-      flasher = !flasher;
-      Serial.println(flasher);
-      if (flasher == true)
-        digitalWrite(2, HIGH);
-      else
-        digitalWrite(2, LOW);
-
-      // Wait 2 seconds before retrying
-      if (BTSerial.available())
-      {
-        flushSerialIn();
-        if (pwCheck())
-          setMQTT();
-        // the device will be rebooted at this point after the operator resets mqtt server
-      }
-      delay(2000);
-    }
-  }
-}
-
-/*****************************************************************************/
-// Check each detector to see if it has something to process
-// Called from each iteration of the main loop
-void checkDetectors()
-{
-  uint8_t _blockID;
-  uint8_t _buf[8];
-  bool _result;
-  const char topicIncrease[] = "mqmtTOS/looseBlock/increase";
-  const char topicDecrease[] = "mqmtTOS/looseBlock/decrease";
-
-  // for (int i = 0; i < 1; i++) // TBD remove this
-  for (int i = 0; i < numDevices; i++)
-  {
-    if (bod[i].check())
-    {
-      // look for block on destination side which will be increased
-      if (bod[i].direction() == WEST)
-        _blockID = bod[i].getBlockWest();
-      else
-        _blockID = bod[i].getBlockEast();
-      _result = procDetectors(_blockID, true);
-
-      if ((!_result) && (_blockID > 0))
-      {
-        // send message to colleagues
-        client.publish(topicIncrease, &_blockID, 1);
-        printMsg("unkept block increased notice sent");
-      }
-
-      // look for block on source side which will be decreased
-      if (bod[i].direction() == WEST)
-        _blockID = bod[i].getBlockEast();
-      else
-        _blockID = bod[i].getBlockWest();
-      _result = procDetectors(_blockID, false);
-
-      if ((!_result) && (_blockID > 0))
-      {
-        // send message to colleagues
-        client.publish(topicDecrease, &_blockID, 1);
-        printMsg("unkept block decreased notice sent");
-      }
-    }
-  }
-}
-
-/*****************************************************************************/
-// Called from checkDetectors or from incoming message from other nodes
-// Returns true if the incoming block was handled here as a block keeper, msg sent to JMRI
-//  false if not, so a local call to this proc returning false requires a msg to be sent to other nodes by the caller
-//  to find a keeper elsewhere
-// A call to this proc from other nodes will not care about the return value as the data is already distributed
-bool procDetectors(byte blockID, bool increase)
-{
-  //   uint8_t _buf[8];
-  int _eventID;
-  uint8_t _buf[8];
-  char numstr[4];
-  const char topic[] = "mymqtt/track/sensor/BODblock";
-  char fullTopic[100];
-
-  sprintf(numstr, "%d", blockID); 
-  strcpy(fullTopic, topic);
-  strcat(fullTopic, numstr);
+  lastPart = topicString.substring(topicString.lastIndexOf('/') + 1);
 
   for (int i = 0; i < numDevices; i++)
   {
-    if (bod[i].getBlockWest() == blockID)
+    if (lastPart.equals(devName[i]))
     {
-      if (bod[i].westKeeper)
-      {
-        if (increase)
-        {
-          bod[i].westCount++;
-          BTSerial.print("westcount ");
-          BTSerial.println(bod[i].westCount);
-          if (bod[i].westCount == 1) // went from zero to one so notify JMRI this block now occupied
-          {
-            // send a message to JMRI
-            client.publish(fullTopic, "ACTIVE");
-            printMsg("Send to JMRI - WEST occupied");
-          }
-        }
-        else
-        {
-          if (bod[i].westCount > 0)
-          {
-            bod[i].westCount--;
-            BTSerial.print("westcount ");
-            BTSerial.println(bod[i].westCount);
-            if (bod[i].westCount == 0) // went from one to zero so notify JMRI this block now unoccupied
-            {
-              // send a message to JMRI
-              client.publish(fullTopic, "INACTIVE");
-              printMsg("Send to JMRI - WEST vacant");
-            }
-          }
-        }
-        return true;
-      }
+      if (strcmp(messChars, "THROWN") == 0)
+        // myStepper[i].setReady(1);
+        BTSerial.println("Thrown received");
+      if (strcmp(messChars, "CLOSED") == 0)
+        // myStepper[i].setReady(0);
+        BTSerial.println("Closed received");
     }
-    if (bod[i].getBlockEast() == blockID)
+  }
+}
+
+/*****************************************************************************/
+void checkSwitches()
+{
+  // for (int i = 0; i < numDevices; i++)
+  for (int i = 0; i < 1; i++) // TBD remove this, testing only
+  {
+    // if corresponding stepper is in ready state or is running just skip it (debounces the switch)
+    if ((digitalRead(switchPin[i]) == LOW) && (!myStepper[i].getRunState()) && (!myStepper[i].getReadyState()))
     {
-      if (bod[i].eastKeeper)
+      switch (myStepper[i].getLastCommanded())
       {
-        if (increase)
-        {
-          bod[i].eastCount++;
-          BTSerial.print("eastcount ");
-          BTSerial.println(bod[i].eastCount);
-          if (bod[i].eastCount == 1)
-          {
-            client.publish(fullTopic, "ACTIVE");
-            printMsg("Send to JMRI - EAST occupied");
-          }
-        }
-        else
-        {
-          if (bod[i].eastCount > 0)
-          {
-            bod[i].eastCount--;
-            BTSerial.print("eastcount ");
-            BTSerial.println(bod[i].eastCount);
-            if (bod[i].eastCount == 0)
-            {
-              // send a message to JMRI
-              client.publish(fullTopic, "INACTIVE");
-              printMsg("Send to JMRI - EAST vacant");
-            }
-          }
-        }
-        return true;
+      case 0:
+        myStepper[i].setReady(1);
+        break;
+      case 1:
+        myStepper[i].setReady(0);
+        break;
+      default:
+        myStepper[i].setReady(1);
+        break;
       }
+      return;
+    }
+  }
+}
+
+/*****************************************************************************/
+bool runSteppers() // returns true if a throw was completed, false otherwise
+{
+  // this routine must be called repeatedly in the loop
+  bool throwComplete = false;
+
+  for (int i = 0; i < numDevices; i++)
+  {
+    if (myStepper[i].getRunState()) // returns false if not in running state
+    {
+      // throwComplete = myStepper[i].run();
+      if (myStepper[i].run()) // true if completed
+      {
+        // if (myStepper->getLastCommanded())
+        //   myCbus.sendMessage(ACON, i);
+        // else
+        //   myCbus.sendMessage(ACOF, i);
+        // return true;
+      }
+      // TBD if returns true then complete, send a message, requires mod to stepper
+      return false; // if it did run don't try to run any others
+    }
+  }
+
+  // if we got here nothing was running so check for steppers that are ready and set the first found to run
+  for (int i = 0; i < numDevices; i++)
+  {
+    if (myStepper[i].getReadyState())
+    {
+      // the first one we find that is ready we set to run and then exit
+      myStepper[i].run();
     }
   }
   return false;
@@ -458,16 +448,15 @@ void showMenu()
   BTSerial.println(BTname);
   BTSerial.println("\n Enter: ");
   BTSerial.println(" 'P' - Print status");
-  BTSerial.println(" 'B' - Set Bluetooth node name");
+  BTSerial.println(" 'N' - Set node name");
   BTSerial.println(" 'X' - Set Bluetooth password");
   BTSerial.println(" 'W' - Set WiFi credentials");
   BTSerial.println(" 'M' - Set MQTT server IP address");
-  BTSerial.println(" 'N' - Set node name");
-  // BTSerial.println(" 'O' - Set optical detector name(s)");
-  BTSerial.println(" 'I' - Set block IDs and keeper status");
-  BTSerial.println(" 'G' - Ghostbuster");
-  BTSerial.println(" 'Z' - Turn off Bluetooth until reset from pin 2");
+  BTSerial.println(" 'C' - Set MQTT channel");
+  BTSerial.println(" 'T' - Set turnout name(s)");
+  // BTSerial.println(" 'Z' - Turn off Bluetooth until reset from pin 2");
   BTSerial.println(" 'D' - Debug display on/off");
+  BTSerial.println(" 'B' - Restart machine");
 
   BTSerial.println("\n Enter 'R' to return to run mode (automatic after 30 sec of inactivity)");
 }
@@ -479,12 +468,13 @@ void configure()
   uint16_t devID;
   uint16_t paramVal;
   uint16_t enteredVal;
-  uint16_t _detectorNumber;
+  uint16_t _turnoutNumber;
   bool paramBool;
   String pw;
   String myString;
   bool beenHereDoneThat = false;
   char myChar;
+  IPAddress ipAdr;
 
   while (true)
   {
@@ -498,60 +488,36 @@ void configure()
 
     switch (getUpperChar(millis()))
     {
-    case 'B': // set node name
-      BTSerial.print("\nEnter node name (device must be rebooted to take effect): ");
-      while (!BTSerial.available())
+
+    case 'T': // turnout names
+      while (true)
       {
+        BTSerial.print("\n Enter turnout number (1 - 4), blank line to exit: ");
+        _turnoutNumber = getNumber(0, numDevices);
+        if (_turnoutNumber <= 0)
+          break;
+        BTSerial.print("\nEnter name, blank line to exit: ");
+        while (!BTSerial.available())
+        {
+        }
+        myString = BTSerial.readString();
+        myString.trim();
+        if (myString.length() == 0)
+          break;
+        devName[_turnoutNumber - 1] = myString;
+        myPrefs.begin(deviceSpace[_turnoutNumber - 1], false);
+        myPrefs.putString("name", myString);
+        myPrefs.end();
+        BTSerial.print("Changed to ");
+        BTSerial.println(myString);
+        break;
       }
-      BTname = BTSerial.readString();
-      BTname.trim();
-      myPrefs.begin("general", false);
-      myPrefs.putString("BTname", BTname);
-      myPrefs.end();
-      BTSerial.print("Changed to ");
-      BTSerial.println(BTname);
-      BTSerial.print("\nReboot now?");
-      if (getUpperChar(0) == 'Y')
-        delay(3000);
-      ESP.restart();
-      break;
-
-    // case 'O': // detector names
-    //   BTSerial.print("\n Enter detector number (1 - 8), 'Q' to quit: ");
-    //   _detectorNumber = getNumber(0, numDevices);
-    //   if (_detectorNumber <= 0)
-    //     break;
-    //   BTSerial.print("\nEnter name: ");
-    //   while (!BTSerial.available())
-    //   {
-    //   }
-    //   myString = BTSerial.readString();
-    //   myString.trim();
-    //   detName[_detectorNumber - 1] = myString;
-    //   myPrefs.begin(deviceSpace[_detectorNumber - 1], false);
-    //   myPrefs.putString("name", myString);
-    //   myPrefs.end();
-    //   BTSerial.print("Changed to ");
-    //   BTSerial.println(myString);
-    //   break;
-
-    case 'I': // block IDs
-      wcDetectorConfiguration();
-      break;
-
-    case 'G': // ghostbuster
-      BTSerial.println("\nEnter block ID to be cleared of ghosts (set to zero occupancy), 'Q' to quit");
-      enteredVal = getNumber(0, 255);
-      if (ghostBuster(enteredVal))
-        BTSerial.println("Ghosts removed");
-      else
-        BTSerial.println("Block not found on this node");
-      break;
 
     case 'P':
     {
       BTSerial.println("\nCurrent configuration");
-      IPAddress ipAdr;
+      BTSerial.print("Node name (MQTT and Bluetooth) = ");
+      BTSerial.println(nodeName);
       ipAdr = WiFi.localIP();
       BTSerial.print("Local IP address = ");
       BTSerial.println(ipAdr);
@@ -559,17 +525,16 @@ void configure()
       BTSerial.println(SSID);
       BTSerial.print("MQTT server = ");
       BTSerial.println(mqttServer);
-      BTSerial.print("MQTT node name = ");
-      BTSerial.println(mqttNode);
-      BTSerial.print("Bluetooth node name = ");
-      BTSerial.println(BTname);
-      // for (int i = 0; i < numDevices; i++)
-      // {
-      //   BTSerial.print("Device ");
-      //   BTSerial.print(i + 1);
-      //   BTSerial.print(" name = ");
-      //   BTSerial.println(detName[i]);
-      // }
+      BTSerial.print("MQTT channel = ");
+      BTSerial.println(mqttChannel);
+
+      for (int i = 0; i < numDevices; i++)
+      {
+        BTSerial.print("Device ");
+        BTSerial.print(i + 1);
+        BTSerial.print(" name = ");
+        BTSerial.println(devName[i]);
+      }
     }
     break;
 
@@ -580,6 +545,8 @@ void configure()
       }
       pw = BTSerial.readString();
       pw.trim();
+      if (myString.length() == 0)
+        break;
       myPrefs.begin("general", false);
       myPrefs.putString("password", pw);
       myPrefs.end();
@@ -589,28 +556,47 @@ void configure()
       break;
 
     case 'W':
-      setCredentials(); // also called explicitly
+      setCredentials();
       break;
 
     case 'M':
-      setMQTT(); // also called explicitly
+      setMQTT();
       break;
 
-    case 'N':
-      BTSerial.println("Enter a name for this node. Used by MQTT, must be unique: ");
+    case 'C': // set mqtt channel
+      BTSerial.print("\nCurrent MQTT channel: ");
+      BTSerial.println(mqttChannel);
+      BTSerial.print("Enter new MQTT channel or blank line to exit: ");
       while (!BTSerial.available())
       {
       }
       myString = BTSerial.readString();
       myString.trim();
+      if (myString.length() == 0)
+        break;
       myPrefs.begin("general", false);
-      myPrefs.putString("mqttnode", myString);
+      myPrefs.putString("mqttchannel", myString);
+      myPrefs.end();
+      BTSerial.print("\nChanged to ");
+      BTSerial.println(myString);
+      BTSerial.println("\nReboot is required");
+      break;
+
+    case 'N':
+      BTSerial.println("Enter a name for this node (must be unique), blank to exit: ");
+      while (!BTSerial.available())
+      {
+      }
+      myString = BTSerial.readString();
+      myString.trim();
+      if (myString.length() == 0)
+        break;
+      myPrefs.begin("general", false);
+      myPrefs.putString("nodename", myString);
       myPrefs.end();
       BTSerial.print("Changed to ");
       BTSerial.println(myString);
-      BTSerial.println("\nDevice will now be rebooted...");
-      delay(3000);
-      ESP.restart();
+      BTSerial.println("\nReboot is required");
       break;
 
     case 'Z':
@@ -626,13 +612,19 @@ void configure()
       myChar = getUpperChar(30000);
       BTSerial.println("Which detector (1-8)?");
       devID = getNumber(1, 8);
-      bod[devID - 1].setDisplayDetect(myChar = 'Y');
+      // bod[devID - 1].setDisplayDetect(myChar = 'Y');
       break;
 
     case 'R':
       BTSerial.println("\nBack to run mode");
-      BTSerial.disconnect();
+      delay(1000);
       return;
+
+    case 'B': // reboot
+      BTSerial.println("\nDevice will now be rebooted...");
+      delay(1000);
+      ESP.restart();
+      break;
 
     default:
       beenHereDoneThat = false;
@@ -690,137 +682,6 @@ void setMQTT()
   BTSerial.println("\nDevice will now be rebooted...");
   delay(3000);
   ESP.restart();
-}
-
-/*****************************************************************************/
-// assign block IDs and keeper status
-void wcDetectorConfiguration()
-{
-  byte _adr;
-  byte _detectorNumber;
-  byte _westBlock;
-  byte _eastBlock;
-  bool _westKeeper;
-  bool _eastKeeper;
-  bool _saved;
-
-  BTSerial.println("\nDetector configuration menu");
-  while (true)
-  {
-    BTSerial.println(" Current values...");
-    for (int i = 0; i < numDevices; i++)
-    {
-      BTSerial.print("D=");
-      BTSerial.print(i + 1);
-      BTSerial.print(" West block ID=");
-      BTSerial.print(bod[i].getBlockWest());
-      BTSerial.print(" ");
-      if (bod[i].westKeeper)
-        BTSerial.print("K ");
-      else
-        BTSerial.print("  ");
-      BTSerial.print(" East block ID=");
-      BTSerial.print(bod[i].getBlockEast());
-      BTSerial.print(" ");
-      if (bod[i].eastKeeper)
-        BTSerial.print("K ");
-      BTSerial.println(" ");
-    }
-
-    BTSerial.print("\n Enter detector number (1 - 8), 'Q' to quit: ");
-    _detectorNumber = getNumber(0, numDevices);
-    if (_detectorNumber <= 0)
-      return;
-
-    _westBlock = bod[_detectorNumber - 1].getBlockWest();
-    _westKeeper = bod[_detectorNumber - 1].westKeeper;
-    _eastBlock = bod[_detectorNumber - 1].getBlockEast();
-    _eastKeeper = bod[_detectorNumber - 1].eastKeeper;
-
-    BTSerial.print("\n Detector number ");
-    BTSerial.println(_detectorNumber);
-
-    _saved = false;
-
-    do
-    {
-      BTSerial.println(" Enter (W) assign west block, (E) assign east block, (S) save, (Q) quit");
-      BTSerial.println(" Enter 0 (zero) for block ID if no block assigned");
-
-      switch (getUpperChar(0))
-      {
-      case 'W':
-        BTSerial.println(" West block ID?");
-        _westBlock = getNumber(0, 255);
-        BTSerial.println(" Is this detector the aggregator for the assigned block? Y or N");
-        _westKeeper = (getUpperChar(0) == 'Y');
-        if (_westKeeper)
-        {
-          BTSerial.print(" Assigned as aggregator for block ");
-          BTSerial.println(_westBlock);
-          BTSerial.print('\n');
-        }
-        break;
-
-      case 'E':
-        BTSerial.println(" East block ID?");
-        _eastBlock = getNumber(0, 255);
-        BTSerial.println(" Is this detector the aggregator for the assigned block? Y or N");
-        _eastKeeper = (getUpperChar(0) == 'Y');
-        if (_eastKeeper)
-        {
-          BTSerial.print(" Assigned as aggregator for block ");
-          BTSerial.println(_eastBlock);
-          BTSerial.print('\n');
-        }
-        break;
-
-      case 'S':
-        BTSerial.println(" Saving");
-        bod[_detectorNumber - 1].setBlockWest(_westBlock);
-        bod[_detectorNumber - 1].setBlockEast(_eastBlock);
-        bod[_detectorNumber - 1].setWestKeeper(_westKeeper);
-        bod[_detectorNumber - 1].setEastKeeper(_eastKeeper);
-        myPrefs.begin(deviceSpace[_detectorNumber - 1], false);
-        myPrefs.putUShort("blockWest", (uint16_t)_westBlock); // TBD check types
-        myPrefs.putUShort("blockEast", (uint16_t)_eastBlock);
-        myPrefs.putBool("westkeeper", _westKeeper);
-        myPrefs.putBool("eastkeeper", _eastKeeper);
-        myPrefs.end();
-        _saved = true;
-        break;
-        ;
-
-      case 'Q':
-        BTSerial.println(F(" Exiting"));
-        return;
-
-      default:
-        BTSerial.println(F(" Exiting"));
-        return;
-      }
-    } while (_saved == false);
-  }
-}
-
-/*****************************************************************************/
-// scare away ghosts from a block
-bool ghostBuster(uint8_t blockID)
-{
-  for (int i = 0; i < numDevices; i++)
-  {
-    if ((bod[i].getBlockWest() == blockID) && (bod[i].westKeeper))
-    {
-      bod[i].westCount = 0;
-      return true;
-    }
-    else if ((bod[i].getBlockEast() == blockID) && (bod[i].eastKeeper))
-    {
-      bod[i].eastCount = 0;
-      return true;
-    }
-  }
-  return false;
 }
 
 /*****************************************************************************/
