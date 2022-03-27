@@ -74,7 +74,6 @@ String mqttNode;
 String mqttChannel;
 char mqttchannel[50];
 String turnoutTopic;
-// char turnoutTopic[100];
 PubSubClient client(espClient);
 
 // Bluetooth
