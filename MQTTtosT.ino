@@ -72,8 +72,8 @@ String wifiPassword;
 String mqttServer;
 String mqttNode;
 String mqttChannel;
-char mqttchannel[50];
 String turnoutTopic;
+String turnoutFeedbackTopic;
 PubSubClient client(espClient);
 
 // Bluetooth
@@ -134,13 +134,11 @@ void setup()
   // get the stored configuration values, defaults are the second parameter in the list
   myPrefs.begin("general");
   nodeName = myPrefs.getString("nodename", "MQTTtosNode");
-  // BTname = myPrefs.getString("BTname", "MQTTtosNode");
   BTname = nodeName;
   BTpassword = myPrefs.getString("password", "IGNORE");
   SSID = myPrefs.getString("SSID", "none");
   wifiPassword = myPrefs.getString("wifipassword", "none");
   mqttServer = myPrefs.getString("mqttserver", "none");
-  // strcpy(mqttchannel, myPrefs.getString("mqttchannel", "trains/").c_str());
   mqttChannel = myPrefs.getString("mqttchannel", "trains/");
   myPrefs.end();
 
@@ -161,15 +159,12 @@ void setup()
   uint8_t ip[4];
   sscanf(mqtt_server, "%u.%u.%u.%u", &ip[0], &ip[1], &ip[2], &ip[3]);
   client.setServer(ip, 1883);
-  // client.setSocketTimeout(60);
   client.setKeepAlive(60);
   client.setCallback(callback);
 
   // TO specific
-  // strcpy(turnoutTopic, mqttchannel);
-  // turnoutTopic = string(mqttchannel) + "track/turnout";
-  turnoutTopic = mqttChannel + "track/turnout";
-  // strcat(turnoutTopic, "track/turnout/");
+  turnoutTopic = mqttChannel + "track/turnout/";
+  turnoutFeedbackTopic = mqttChannel + "track/sensor/turnout/";
 
   // read the stored values for speed, throw, torque and reversed
   // send those values to the stepper objects
@@ -271,10 +266,13 @@ void reconnect()
       char subscription[50];
       // accept all <channel>/track/turnout/ topics
       // they will be of the form <JMRI channel>/track/turnout/<JMRI system name> THROWN/CLOSED
-      // strcpy(subscription, mqttchannel);
-      strcpy(subscription, mqttChannel.c_str());
-      strcat(subscription, "track/turnout/+");
-      client.subscribe(subscription, 1);
+      for (int i = 0; i < numDevices; i++)
+      {
+        strcpy(subscription, mqttChannel.c_str());
+        strcat(subscription, "track/turnout/");
+        strcat(subscription, devName[i].c_str());
+        client.subscribe(subscription, 1);
+      }
     }
     else
     {
@@ -336,15 +334,16 @@ void loop()
 
   // checkSwitches(); TBD need pullups for this to work
 
-  // if (runSteppers() && returnToMenu) // runSteppers returns true at end of throw, check if throw was commanded from menu
-  // {
-  //   returnToMenu = false; // we came here from the menu 'A' command, return to menu
-  //   configure();
-  // }
+  if (runSteppers() && returnToMenu) // runSteppers returns true at end of throw, check if throw was commanded from menu
+  {
+    returnToMenu = false; // we came here from the menu 'A' command, return to menu
+    configure();
+  }
 }
 
 /*****************************************************************************/
 // this is a callback from the mqtt object, made when a subscribed message comes in
+// we only expect four topics that were subscribed so only need to check the last part which is the device
 void callback(char *topic, byte *message, unsigned int length)
 {
   String topicString;
@@ -357,9 +356,6 @@ void callback(char *topic, byte *message, unsigned int length)
     messChars[i] = (char)message[i];
   messChars[length] = '\0';
 
-  if (turnoutTopic.equals(topicString.substring(0, topicString.lastIndexOf('/') + 1)))
-    return;
-
   lastPart = topicString.substring(topicString.lastIndexOf('/') + 1);
 
   for (int i = 0; i < numDevices; i++)
@@ -367,11 +363,11 @@ void callback(char *topic, byte *message, unsigned int length)
     if (lastPart.equals(devName[i]))
     {
       if (strcmp(messChars, "THROWN") == 0)
-        // myStepper[i].setReady(1);
-        BTSerial.println("Thrown received");
+        myStepper[i].setReady(1);
+      BTSerial.println("Thrown received");
       if (strcmp(messChars, "CLOSED") == 0)
-        // myStepper[i].setReady(0);
-        BTSerial.println("Closed received");
+        myStepper[i].setReady(0);
+      BTSerial.println("Closed received");
     }
   }
 }
@@ -407,21 +403,21 @@ bool runSteppers() // returns true if a throw was completed, false otherwise
 {
   // this routine must be called repeatedly in the loop
   bool throwComplete = false;
+  String feedbackTopic;
 
   for (int i = 0; i < numDevices; i++)
   {
     if (myStepper[i].getRunState()) // returns false if not in running state
     {
-      // throwComplete = myStepper[i].run();
       if (myStepper[i].run()) // true if completed
       {
-        // if (myStepper->getLastCommanded())
-        //   myCbus.sendMessage(ACON, i);
-        // else
-        //   myCbus.sendMessage(ACOF, i);
-        // return true;
+        feedbackTopic = turnoutFeedbackTopic + devName[i];
+        if (myStepper[i].getLastCommanded())
+          client.publish(feedbackTopic.c_str(), "THROWN");
+        else
+          client.publish(feedbackTopic.c_str(), "CLOSED");
+        return true;
       }
-      // TBD if returns true then complete, send a message, requires mod to stepper
       return false; // if it did run don't try to run any others
     }
   }
@@ -433,6 +429,7 @@ bool runSteppers() // returns true if a throw was completed, false otherwise
     {
       // the first one we find that is ready we set to run and then exit
       myStepper[i].run();
+      BTSerial.println("told it to run");
     }
   }
   return false;
@@ -443,7 +440,7 @@ bool runSteppers() // returns true if a throw was completed, false otherwise
 void showMenu()
 {
   BTSerial.println(" ");
-  BTSerial.print("\nMain menu for ");
+  BTSerial.print("\nTurnout Controller Main menu for ");
   BTSerial.println(BTname);
   BTSerial.println("\n Enter: ");
   BTSerial.println(" 'P' - Print status");
@@ -453,6 +450,7 @@ void showMenu()
   BTSerial.println(" 'M' - Set MQTT server IP address");
   BTSerial.println(" 'C' - Set MQTT channel");
   BTSerial.println(" 'T' - Set turnout name(s)");
+  BTSerial.println(" 'S' - Set stepper parameters");
   // BTSerial.println(" 'Z' - Turn off Bluetooth until reset from pin 2");
   BTSerial.println(" 'D' - Debug display on/off");
   BTSerial.println(" 'B' - Restart machine");
@@ -631,6 +629,17 @@ void configure()
     }
   }
 }
+
+
+
+
+
+
+
+
+
+
+
 
 /*****************************************************************************/
 void setCredentials()
