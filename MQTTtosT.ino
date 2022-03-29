@@ -121,7 +121,7 @@ StepperMRTO myStepper[] =
 // switch pins for manual control, these must have pullup resistors
 uint16_t const switchPin[4] = {34, 35, 36, 39};
 
-bool returnToMenu = false; // for actuation feature in menu TBD
+bool returnToMenu = false; // for test actuation feature from menu
 
 /*****************************************************************************/
 void setup()
@@ -129,7 +129,7 @@ void setup()
   byte myVal;
 
   Serial.begin(115200);
-  pinMode(2, INPUT_PULLUP); // this is used for resetting Bluetooth
+  pinMode(5, INPUT_PULLUP); // this is used for resetting Bluetooth
 
   // get the stored configuration values, defaults are the second parameter in the list
   myPrefs.begin("general");
@@ -142,13 +142,11 @@ void setup()
   mqttChannel = myPrefs.getString("mqttchannel", "trains/");
   myPrefs.end();
 
-  // wifiPassword = "Bogus";
-
   // Bluetooth
-  // myPrefs.begin("general");
-  // if (myPrefs.getBool("BTon", true)) TBD always turn on BT on reboot?
-  BTSerial.begin(nodeName);
-  // myPrefs.end();
+  myPrefs.begin("general");
+  if (myPrefs.getBool("BTon", true))
+    BTSerial.begin(nodeName);
+  myPrefs.end();
 
   // WiFi
   setup_wifi();
@@ -161,6 +159,9 @@ void setup()
   client.setServer(ip, 1883);
   client.setKeepAlive(60);
   client.setCallback(callback);
+  char mqtt_node[nodeName.length() + 1];
+  strcpy(mqtt_node, nodeName.c_str());
+  client.connect(mqtt_node);
 
   // TO specific
   turnoutTopic = mqttChannel + "track/turnout/";
@@ -218,18 +219,19 @@ void setup_wifi()
     delay(300);
     Serial.print(".");
     // blink the blue LED to indicate error condition
-    digitalWrite(2, HIGH);
-    delay(300);
     digitalWrite(2, LOW);
+    delay(300);
+    digitalWrite(2, HIGH);
 
     if (millis() - now > 5000)
       break;
   }
 
+  digitalWrite(2, HIGH);
+  pinMode(2, INPUT_PULLUP);
+
   if (WiFi.status() == WL_CONNECTED)
   {
-    digitalWrite(2, LOW);
-    pinMode(2, INPUT);
     return;
   }
   else
@@ -254,6 +256,8 @@ void reconnect()
 
   char mqtt_node[nodeName.length() + 1];
   strcpy(mqtt_node, nodeName.c_str());
+
+  uint32_t now = millis();
 
   // Loop until we're reconnected TBD change all Serial to BTSerial (maybe)
   while (!client.connected())
@@ -281,24 +285,30 @@ void reconnect()
       Serial.print(mqttServer);
       Serial.print(" Response was ");
       Serial.println(client.state());
-      Serial.println("Looping every 2 seconds. MQTT server must be configured using BT menu");
+      Serial.println("Retrying. MQTT server must be configured using BT menu");
       flasher = !flasher;
       Serial.println(flasher);
       if (flasher == true)
         digitalWrite(2, HIGH);
       else
         digitalWrite(2, LOW);
-
-      // Wait 2 seconds before retrying
-      if (BTSerial.available())
-      {
-        flushSerialIn();
-        if (pwCheck())
-          configure();
-        // the device will be rebooted at this point after the operator resets mqtt server
-      }
-      delay(2000);
+      // Wait 1 second before retrying
+      delay(1000);
     }
+    if (millis() - now > 5000)
+      break;
+  }
+
+  // digitalWrite(2, HIGH);
+  pinMode(2, INPUT_PULLUP);
+
+  if (BTSerial.available() && !client.connected())
+  // show the config menu so operator can set the MQTT server
+  {
+    flushSerialIn();
+    if (pwCheck())
+      configure();
+    // the device should be rebooted at this point after the operator resets mqtt server
   }
 }
 
@@ -309,20 +319,22 @@ void loop()
   // use this if Bluetooth has been disabled from the menu (to prevent hackers in the house)
   // or if password was forgotten
   // TBD maybe this should go in setup, use first switch pin to save pins
-  // if (digitalRead(2) == LOW) //TBD fix this, does not work as expected
-  // {
-  //   BTSerial.begin();
-  //   myPrefs.begin("general", false);
-  //   myPrefs.putBool("BTon", true);
-  //   myPrefs.putString("password", "IGNORE");
-  //   myPrefs.end();
-  //   configure();
-  // }
+  if (digitalRead(5) == LOW) // TBD fix this, does not work as expected
+  {
+    BTSerial.begin();
+    myPrefs.begin("general", false);
+    myPrefs.putBool("BTon", true);
+    myPrefs.putString("password", "IGNORE");
+    myPrefs.end();
+    configure();
+  }
 
   if (!client.connected())
   {
+    Serial.print("it was disconnected alright");
     reconnect();
   }
+
   client.loop();
 
   if (BTSerial.available())
@@ -451,6 +463,7 @@ void showMenu()
   BTSerial.println(" 'C' - Set MQTT channel");
   BTSerial.println(" 'T' - Set turnout name(s)");
   BTSerial.println(" 'S' - Set stepper parameters");
+  BTSerial.println(" 'A' - Actuate a stepper from here");
   // BTSerial.println(" 'Z' - Turn off Bluetooth until reset from pin 2");
   BTSerial.println(" 'D' - Debug display on/off");
   BTSerial.println(" 'B' - Restart machine");
@@ -519,9 +532,17 @@ void configure()
       BTSerial.print("Local IP address = ");
       BTSerial.println(ipAdr);
       BTSerial.print("SSID = ");
-      BTSerial.println(SSID);
+      BTSerial.print(SSID);
+      if (WiFi.status() == WL_CONNECTED)
+        BTSerial.println(" connected");
+      else
+        BTSerial.println(" not connected");
       BTSerial.print("MQTT server = ");
-      BTSerial.println(mqttServer);
+      BTSerial.print(mqttServer);
+      if (client.connected())
+        BTSerial.println(" connected");
+      else
+        BTSerial.println(" not connected");
       BTSerial.print("MQTT channel = ");
       BTSerial.println(mqttChannel);
 
@@ -596,6 +617,17 @@ void configure()
       BTSerial.println("\nReboot is required");
       break;
 
+    case 'S': // stepper configuration
+      stepperParameters();
+      break;
+
+    case 'A':
+      BTSerial.print("\nActuate a turnout motor\nEnter device number (1 - 4): ");
+      devID = getNumber(1, 4);
+      myStepper[devID - 1].setReady(!myStepper[devID - 1].getLastCommanded());
+      returnToMenu = true;
+      return;
+
     case 'Z':
       myPrefs.begin("general", false);
       myPrefs.putBool("BTon", false);
@@ -630,16 +662,150 @@ void configure()
   }
 }
 
+/*****************************************************************************/
+void stepperParameters()
+/*****************************************************************************/
+{
+  uint16_t devID;
+  uint16_t paramVal;
+  bool paramBool;
 
+  while (true)
+  {
+    BTSerial.println("\nConfigure Speed, Throw, Force and Direction");
+    BTSerial.println("Enter S, T, F or D. Enter blank line to exit");
 
+    switch (getUpperChar(millis()))
+    {
+    case 'S':
+      BTSerial.println("Speed (rpm, valid value 100 - 2000, default = 1000)");
+      BTSerial.println("Enter device (1 - 4) or 0 for all");
 
+      devID = getNumber(0, 4);
+      BTSerial.print("Enter value for ");
+      if (devID == 0)
+        BTSerial.println("all devices");
+      else
+      {
+        BTSerial.print("device ");
+        BTSerial.println(devID);
+      }
+      paramVal = getNumber(100, 2000);
+      if (devID == 0)
+        for (int i = 0; i < numDevices; i++)
+        {
+          myPrefs.begin(deviceSpace[i], false);
+          myPrefs.putUShort("speed", paramVal);
+          myPrefs.end();
+          myStepper[i].setSpeed(paramVal);
+        }
+      else
+      {
+        myPrefs.begin(deviceSpace[devID - 1], false);
+        myPrefs.putUShort("speed", paramVal);
+        myPrefs.end();
+        myStepper[devID].setSpeed(paramVal);
+      }
+      break;
 
+    case 'T':
+      BTSerial.println("Throw (steps, valid value 200 - 800, default = 600, 1000 steps = 7mm)");
+      BTSerial.println("Enter device (1 - 4) or 0 for all");
 
+      devID = getNumber(0, 4);
+      BTSerial.print("Enter value for ");
+      if (devID == 0)
+        BTSerial.println("all devices");
+      else
+      {
+        BTSerial.print("device ");
+        BTSerial.println(devID);
+      }
+      paramVal = getNumber(200, 800) / 10;
+      if (devID == 0)
+        for (int i = 0; i < numDevices; i++)
+        {
+          myPrefs.begin(deviceSpace[i], false);
+          myPrefs.putUShort("throw", paramVal);
+          myPrefs.end();
+          myStepper[i].setStrokeSteps(paramVal);
+        }
+      else
+      {
+        myPrefs.begin(deviceSpace[devID - 1], false);
+        myPrefs.putUShort("throw", paramVal);
+        myPrefs.end();
+        myStepper[devID].setStrokeSteps(paramVal);
+      }
+      break;
 
+    case 'F':
+      BTSerial.println("Force (microseconds, valid value 100 - 2550, default = 1500)");
+      BTSerial.println("Enter device (1 - 4) or 0 for all");
 
+      devID = getNumber(0, 4);
+      BTSerial.print("Enter value for ");
+      if (devID == 0)
+        BTSerial.println("all devices");
+      else
+      {
+        BTSerial.print("device ");
+        BTSerial.println(devID);
+      }
+      paramVal = getNumber(100, 2550);
+      if (devID == 0)
+        for (int i = 0; i < numDevices; i++)
+        {
+          myPrefs.begin(deviceSpace[i], false);
+          myPrefs.putUShort("force", paramVal);
+          myPrefs.end();
+          myStepper[i].setTorqueLimit(paramVal);
+        }
+      else
+      {
+        myPrefs.begin(deviceSpace[devID - 1], false);
+        myPrefs.putUShort("force", paramVal);
+        myPrefs.end();
+        myStepper[devID].setTorqueLimit(paramVal);
+      }
+      break;
 
+    case 'D':
+      BTSerial.println("Direction (0 or 1, 1 reverses the normal direction of throw");
+      BTSerial.println("Enter device (1 - 4) or 0 for all");
 
+      devID = getNumber(0, 4);
+      BTSerial.print("Enter value for ");
+      if (devID == 0)
+        BTSerial.println("all devices");
+      else
+      {
+        BTSerial.print("device ");
+        BTSerial.println(devID);
+      }
+      paramBool = getNumber(0, 1);
+      if (devID == 0)
+        for (int i = 0; i < numDevices; i++)
+        {
+          myPrefs.begin(deviceSpace[i], false);
+          myPrefs.putBool("reversed", paramBool);
+          myPrefs.end();
+          myStepper[i].setReversed(paramVal);
+        }
+      else
+      {
+        myPrefs.begin(deviceSpace[devID - 1], false);
+        myPrefs.putBool("reversed", paramBool);
+        myPrefs.end();
+        myStepper[devID].setReversed(paramVal);
+      }
+      break;
 
+    default:
+      return;
+    }
+  }
+}
 
 /*****************************************************************************/
 void setCredentials()
@@ -667,9 +833,8 @@ void setCredentials()
   myPrefs.end();
   BTSerial.print("Changed to ");
   BTSerial.println(myString);
-  BTSerial.println("\nDevice will now be rebooted...");
-  delay(3000);
-  ESP.restart();
+  BTSerial.println("\nReboot is required");
+  return;
 }
 
 /*****************************************************************************/
@@ -687,9 +852,8 @@ void setMQTT()
   myPrefs.end();
   BTSerial.print("Changed to ");
   BTSerial.println(myString);
-  BTSerial.println("\nDevice will now be rebooted...");
-  delay(3000);
-  ESP.restart();
+  BTSerial.println("\nReboot is required");
+  return;
 }
 
 /*****************************************************************************/
