@@ -24,10 +24,10 @@ SOFTWARE.
 
   Pin assignments:
    01  TX0
-   02  switch for configuration via bluetooth
+   02  
    03  RX0
    04  GPIO
-   05  GPIO
+   05  switch for configuration via bluetooth
    12  A+ stepper 1
    13  A- stepper 1
    14  B+ stepper 1
@@ -59,6 +59,8 @@ SOFTWARE.
 //#define testing
 
 using namespace std;
+
+const char *version = "B.0";
 
 Preferences myPrefs;
 char *deviceSpace[] = {"d1", "d2", "d3", "d4"};
@@ -159,15 +161,16 @@ void setup()
   client.setServer(ip, 1883);
   client.setKeepAlive(60);
   client.setCallback(callback);
-  char mqtt_node[nodeName.length() + 1];
-  strcpy(mqtt_node, nodeName.c_str());
-  client.connect(mqtt_node);
+  connectMQTT();
 
-  // TO specific
+  // turnout specific
   turnoutTopic = mqttChannel + "track/turnout/";
   turnoutFeedbackTopic = mqttChannel + "track/sensor/turnout/";
+  
+  setupSubscriptions();
 
   // read the stored values for speed, throw, torque and reversed
+  // defaults are the second parameter in the list
   // send those values to the stepper objects
   for (int i = 0; i < numDevices; i++)
   {
@@ -217,7 +220,6 @@ void setup_wifi()
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(300);
-    Serial.print(".");
     // blink the blue LED to indicate error condition
     digitalWrite(2, LOW);
     delay(300);
@@ -227,7 +229,6 @@ void setup_wifi()
       break;
   }
 
-  digitalWrite(2, HIGH);
   pinMode(2, INPUT_PULLUP);
 
   if (WiFi.status() == WL_CONNECTED)
@@ -250,7 +251,7 @@ void setup_wifi()
 }
 
 /*****************************************************************************/
-void reconnect()
+void connectMQTT()
 {
   bool flasher = false;
 
@@ -260,46 +261,28 @@ void reconnect()
   uint32_t now = millis();
 
   // Loop until we're reconnected TBD change all Serial to BTSerial (maybe)
-  while (!client.connected())
+  while (!client.connect(mqtt_node))
   {
-    Serial.print("Attempting MQTT connection...");
-    // Attempt to connect
-    if (client.connect(mqtt_node))
-    {
-      Serial.println("connected");
-      char subscription[50];
-      // accept all <channel>/track/turnout/ topics
-      // they will be of the form <JMRI channel>/track/turnout/<JMRI system name> THROWN/CLOSED
-      for (int i = 0; i < numDevices; i++)
-      {
-        strcpy(subscription, mqttChannel.c_str());
-        strcat(subscription, "track/turnout/");
-        strcat(subscription, devName[i].c_str());
-        client.subscribe(subscription, 1);
-      }
-    }
+    pinMode(2, OUTPUT);
+    Serial.print("Failed to connect to ");
+    Serial.print(mqttServer);
+    Serial.print(" Response was ");
+    Serial.println(client.state());
+    Serial.println("Retrying. MQTT server must be configured using BT menu");
+    flasher = !flasher;
+    if (flasher == true)
+      digitalWrite(2, HIGH);
     else
-    {
-      pinMode(2, OUTPUT);
-      Serial.print("Failed to connect to ");
-      Serial.print(mqttServer);
-      Serial.print(" Response was ");
-      Serial.println(client.state());
-      Serial.println("Retrying. MQTT server must be configured using BT menu");
-      flasher = !flasher;
-      Serial.println(flasher);
-      if (flasher == true)
-        digitalWrite(2, HIGH);
-      else
-        digitalWrite(2, LOW);
-      // Wait 1 second before retrying
-      delay(1000);
-    }
-    if (millis() - now > 5000)
+      digitalWrite(2, LOW);
+    // Wait 1 second before retrying
+    delay(1000);
+
+    if (millis() - now > 5000 && BTSerial.available())
+      // this is not looking good so bail out and let operator set configuration
+      // if BT is not available just keep blinking the blue light
       break;
   }
 
-  // digitalWrite(2, HIGH);
   pinMode(2, INPUT_PULLUP);
 
   if (BTSerial.available() && !client.connected())
@@ -309,6 +292,21 @@ void reconnect()
     if (pwCheck())
       configure();
     // the device should be rebooted at this point after the operator resets mqtt server
+  }
+}
+
+/*****************************************************************************/
+void setupSubscriptions()
+{
+  char subscription[50];
+  // accept all <channel>/track/turnout/ topics
+  // they will be of the form <JMRI channel>/track/turnout/<JMRI system name> THROWN/CLOSED
+  for (int i = 0; i < numDevices; i++)
+  {
+    strcpy(subscription, mqttChannel.c_str());
+    strcat(subscription, "track/turnout/");
+    strcat(subscription, devName[i].c_str());
+    client.subscribe(subscription, 1);
   }
 }
 
@@ -331,8 +329,8 @@ void loop()
 
   if (!client.connected())
   {
-    Serial.print("it was disconnected alright");
-    reconnect();
+    connectMQTT();
+    setupSubscriptions();
   }
 
   client.loop();
@@ -502,7 +500,7 @@ void configure()
     case 'T': // turnout names
       while (true)
       {
-        BTSerial.print("\n Enter turnout number (1 - 4), blank line to exit: ");
+        BTSerial.print("\nEnter turnout number (1 - 4), blank line to exit: ");
         _turnoutNumber = getNumber(0, numDevices);
         if (_turnoutNumber <= 0)
           break;
@@ -526,6 +524,8 @@ void configure()
     case 'P':
     {
       BTSerial.println("\nCurrent configuration");
+      BTSerial.print("Firmware version: ");
+      BTSerial.println(version);
       BTSerial.print("Node name (MQTT and Bluetooth) = ");
       BTSerial.println(nodeName);
       ipAdr = WiFi.localIP();
