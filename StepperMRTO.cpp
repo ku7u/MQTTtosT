@@ -1,5 +1,5 @@
 /*
- * mrTOStepper.cpp - Stepper library for model railroad turnout control
+ * StepperMRTO.cpp - Stepper library for model railroad turnout control
  *
  * Derived from original stepper.cpp and modifications by Tom Igoe et. al.
  * Total rewrite for microstepper         by George Hofmann 1/5/2022
@@ -124,16 +124,6 @@ void StepperMRTO::setReady(bool direction)
 // called repeatedly by loop code
 bool StepperMRTO::run(void)
 {
-  // uint32_t dutyFactor = 50;
-  // uint32_t wholeSlice = 100; //_stepInterval/10;
-  // uint32_t onSlice = wholeSlice * dutyFactor / 100;
-  // uint32_t offSlice = wholeSlice * (100 - dutyFactor) / 100;
-  // static bool _chopper;
-  // static bool _on;
-
-  // onSlice = wholeSlice * dutyFactor / 100;
-  // offSlice = wholeSlice * (100 - dutyFactor) / 100;
-
   // return false if not currently running and not ready to run
   if (!(_readyToRun || _isRunning))
     return false;
@@ -149,50 +139,17 @@ bool StepperMRTO::run(void)
       _isRunning = true;
       _lastStepStartTime = micros();
       _lastSliceStartTime = _lastStepStartTime;
-      // _chopper = false;
     }
 
     _now = micros();
 
-    // reduce the torque by limiting the current flow to a shorter period than the whole step
-    if (_torqueInterval > 0)
-    {
-      if (((_now - _lastStepStartTime) >= _torqueInterval) && ((_now - _lastStepStartTime) < _stepInterval))
-        release();
-    }
-    // if ((_on && _chopper && ((_now - _lastSliceStartTime) > 100)) || (!_on && _chopper && ((_now - _lastSliceStartTime) > 600)))
-    // {
-    //   if (_on) release();
-    //   else stepMotor(_currentStep);
-    //   _on = !_on;
-    //   _lastSliceStartTime = micros();
-    // }
-
-    // if (!_chopper && ((_now - _lastStepStartTime) >= _torqueInterval))
-    // {
-    //   release();
-    //   _lastSliceStartTime = micros();
-    //   _chopper = true;
-    //   _on = false;
-    // }
-
-    // if (_now - _lastSliceStartTime >= offSlice + onSlice)
-    // {
-    //   _lastSliceStartTime = micros();
-    //   stepMotor(_currentStep);
-    // }
-    // else
-    // {
-    //   if (_now - _lastSliceStartTime >= onSlice);
-    //   {
-    //     release();
-    //   }
-    // }
+    // turn off current before end of step to reduce torque
+    if (_stepInterval  - (_now - _lastStepStartTime) < _torqueInterval)
+      release();
 
     // move only if the appropriate delay has passed:
     if ((_now - _lastStepStartTime) >= _stepInterval)
     {
-      // _chopper = false;
 
       // remember when this step started
       _lastStepStartTime = _now;
@@ -216,13 +173,11 @@ bool StepperMRTO::run(void)
         _currentStep--; // TBD does this need to be moved up before the if?
       }
       // decrement the steps left to go and test for done
-      // _stepsLeftToGo--;
-
       if (--_stepsLeftToGo == 0) // done with the stroke if zero
       {
         release();                    // turn off the juice to reduce overheating
-        pinMode(_motorAMinus, INPUT); // for multiplexing, don't want this pin acting as a sink while other coils are active
-        pinMode(_motorBMinus, INPUT); // as above, done with these pins for now
+        // pinMode(_motorAMinus, INPUT); // for multiplexing, don't want this pin acting as a sink while other coils are active
+        // pinMode(_motorBMinus, INPUT); // as above, done with these pins for now
         _isRunning = false;
         return true; // return true to signal caller that throw is complete
       }
