@@ -64,7 +64,7 @@ ToDo:
 
 using namespace std;
 
-const char *version = "E.0";
+const char *version = "E.1";
 
 Preferences myPrefs;
 char *deviceSpace[] = {"d1", "d2", "d3", "d4"};
