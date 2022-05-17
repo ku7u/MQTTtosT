@@ -59,12 +59,13 @@ ToDo:
 #include <PubSubClient.h>
 #include "WiFi.h"
 #include <BluetoothSerial.h>
+#include <Adafruit_NeoPixel.h>
 #include "StepperMRTO.h"
 //#define testing
 
 using namespace std;
 
-const char *version = "E.1";
+const char *version = "F.0";
 
 Preferences myPrefs;
 char *deviceSpace[] = {"d1", "d2", "d3", "d4"};
@@ -131,6 +132,19 @@ bool switchesAvailable = false; // change to true from menu if switch pins have 
 
 bool returnToMenu = false; // for test actuation feature from menu
 
+// neoPixels
+#define LED_PIN 4
+#define LED_COUNT 4
+uint32_t red;
+uint32_t yellow;
+uint32_t green;
+uint32_t blue;
+uint32_t dark = 0;
+bool flasher;           // used to flash the yellow light while moving
+uint32_t lastFlashTime; // for flasher
+
+Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+
 /*****************************************************************************/
 void setup()
 {
@@ -138,6 +152,16 @@ void setup()
 
   Serial.begin(115200);
   pinMode(5, INPUT_PULLUP); // this is used for resetting Bluetooth
+
+  // start neoPixels and set to blue
+  strip.begin();
+  red = strip.Color(100, 0, 0);
+  yellow = strip.Color(70, 30, 0);
+  green = strip.Color(0, 80, 0);
+  blue = strip.Color(0, 0, 160);
+  for (int i = 0; i < NUM_DEVICES; i++)
+    strip.setPixelColor(i, blue);
+  strip.show();
 
   // get the stored configuration values, defaults are the second parameter in the list
   myPrefs.begin("general");
@@ -361,6 +385,7 @@ void loop()
     returnToMenu = false; // we came here from the menu 'A' command, return to menu
     configure();
   }
+
 }
 
 /*****************************************************************************/
@@ -438,10 +463,28 @@ bool runSteppers() // returns true if a throw was completed, false otherwise
       {
         feedbackTopic = turnoutFeedbackTopic + devName[i];
         if (myStepper[i].getLastCommanded())
+        {
           client.publish(feedbackTopic.c_str(), "ACTIVE");
+          strip.setPixelColor(i, red);
+        }
         else
+        {
           client.publish(feedbackTopic.c_str(), "INACTIVE");
+          strip.setPixelColor(i, green);
+        }
+        strip.show();
         return true;
+      }
+      // flash the yellow when in motion
+      if (millis() - lastFlashTime > 100)
+      {
+        lastFlashTime = millis();
+        if (flasher)
+        strip.setPixelColor(i, yellow);
+        else
+        strip.setPixelColor(i, 0);
+        flasher = !flasher;
+        strip.show();
       }
       return false; // if it did run don't try to run any others
     }
@@ -454,9 +497,12 @@ bool runSteppers() // returns true if a throw was completed, false otherwise
     {
       // the first one we find that is ready we set to run and then exit
       myStepper[i].run();
-      // BTSerial.println("told it to run");
+      strip.setPixelColor(i, yellow);
+      strip.show();
+      break;
     }
   }
+
   return false;
 }
 
@@ -634,7 +680,7 @@ void configure()
       break;
 
     case 'L': // set topic left end
-    changed = false;
+      changed = false;
       BTSerial.print("\n Current topic header: ");
       BTSerial.println(topicLeftEnd);
       BTSerial.println("\n Enter new topic header or blank line to exit: ");
@@ -672,7 +718,8 @@ void configure()
         BTSerial.print("\n Changed to ");
         BTSerial.println(myString);
       }
-      if (changed) BTSerial.println("\n Reboot is required");
+      if (changed)
+        BTSerial.println("\n Reboot is required");
       break;
 
     case 'S': // stepper configuration
