@@ -47,9 +47,19 @@ public:
 
   // speed setter method:
   void setSpeed(long rpmSpeed);
+  uint32_t getSpeed();
 
   // set the magnitude of the stroke in steps
   void setStrokeSteps(int strokeSteps);
+  uint32_t getStrokeSteps();
+
+  // limit length of individual step to control torque
+  void setTorqueLimit(unsigned long stepLimit);
+  uint32_t getTorqueLimit();
+
+  // set the default run direction
+  void setReversed(bool reversed);
+  bool getReversed();
 
   // start method primes the code to run on subsequent loops
   // either a button push or a remote command could call this
@@ -61,17 +71,11 @@ public:
   // set current to zero at end of stroke to prevent stressing output pin
   void release(void);
 
-  // limit length of individual step to control torque
-  void setTorqueLimit(unsigned long stepLimit);
-
   //check running state, running or not
   bool getRunState();
 
   //get ready to run state
   bool getReadyState();
-
-  // set the default run direction
-  void setReversed(bool reversed);
 
   // report the last position
   int getLastCommanded();
@@ -82,19 +86,19 @@ private:
   void stepMotor(int this_step);
 
   bool _direction;          // Direction of rotation
-  uint16_t _stepInterval;   // delay between steps, in ms, based on speed
-  uint16_t _torqueInterval; // shortened interval to reduce torque and average current
+  uint32_t _stepInterval;   // delay between steps, in ms, based on speed
+  uint32_t _torqueInterval; // shortened interval to reduce torque and average current
   uint16_t _strokeSteps;    // steps to take in this run
   uint32_t _now;
   uint32_t _lastStepStartTime; // time stamp in us of when the last step was started
-  uint32_t _lastSliceStartTime;
   bool _isRunning;
   bool _readyToRun;
   bool _currentDirection;
-  int _currentStep; // which step the motor is on
-  int _stepsLeftToGo;
-  int _stepsPerRevolution;
+  uint32_t _currentStep; // which step the motor is on
+  uint32_t _stepsLeftToGo;
+  uint32_t _stepsPerRevolution;
   int _lastCommanded;
+  uint32_t _rpmSpeed;
   bool _reversed;
 
   // motor pin numbers:

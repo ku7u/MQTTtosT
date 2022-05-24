@@ -32,6 +32,8 @@
  */
 
 #include "StepperMRTO.h"
+#include <esp_timer.h>
+#include "routines.h"
 
 // Constructor, sets the number of steps per revolution and the pin connections to the windings
 StepperMRTO::StepperMRTO(int stepsPerRevolution, int motorAPlus, int motorAMinus,
@@ -43,7 +45,6 @@ StepperMRTO::StepperMRTO(int stepsPerRevolution, int motorAPlus, int motorAMinus
   _direction = 0;   // motor direction
   _lastCommanded = 0;
   _lastStepStartTime = 0; // time stamp in us of the start of the last step
-  _lastSliceStartTime = 0;
   _stepsPerRevolution = stepsPerRevolution; // number of steps in one revolution
   _strokeSteps = 500;                       // typical default value for length of stroke
   _torqueInterval = 1000;                   // value derived empirically, value in usecs - effect is to limit the torque and heat
@@ -58,9 +59,11 @@ StepperMRTO::StepperMRTO(int stepsPerRevolution, int motorAPlus, int motorAMinus
 
   // setup the pins on the microcontroller:
   pinMode(_motorAPlus, OUTPUT);
-  pinMode(_motorAMinus, INPUT); // for multiplexing, assures no current flow when not running, set to output in run routine
+  // pinMode(_motorAMinus, INPUT); // for multiplexing, assures no current flow when not running, set to output in run routine
+  pinMode(_motorAMinus, OUTPUT); 
   pinMode(_motorBPlus, OUTPUT);
-  pinMode(_motorBMinus, INPUT); // for multiplexing, assures no current flow when not running, set to output in run routine
+  // pinMode(_motorBMinus, INPUT); // for multiplexing, assures no current flow when not running, set to output in run routine
+  pinMode(_motorBMinus, OUTPUT);
 
   // set the default step interval that results in 1000 rpm
   _stepInterval = 60L * 1000L * 1000L / _stepsPerRevolution / 1000;
@@ -88,6 +91,12 @@ int StepperMRTO::getLastCommanded()
 void StepperMRTO::setSpeed(long rpmSpeed)
 {
   _stepInterval = 60L * 1000L * 1000L / _stepsPerRevolution / rpmSpeed;
+  _rpmSpeed = rpmSpeed;
+}
+
+uint32_t StepperMRTO::getSpeed()
+{
+  return _rpmSpeed;
 }
 
 // set the value for torqueInterval if the default value is not optimum
@@ -97,16 +106,31 @@ void StepperMRTO::setTorqueLimit(unsigned long stepLimit)
   _torqueInterval = stepLimit;
 }
 
+uint32_t StepperMRTO::getTorqueLimit()
+{
+  return _torqueInterval;
+}
+
 // set stroke length to override the default value
 void StepperMRTO::setStrokeSteps(int strokeSteps)
 {
   _strokeSteps = strokeSteps;
 }
 
+uint32_t StepperMRTO::getStrokeSteps()
+{
+  return _strokeSteps;
+}
+
 // set last known position to establish default direction
 void StepperMRTO::setReversed(bool reversed)
 {
   _reversed = reversed;
+}
+
+bool StepperMRTO::getReversed()
+{
+  return _reversed;
 }
 
 // prep for running, subsequent run command will refer to ready state
@@ -131,29 +155,28 @@ bool StepperMRTO::run(void)
   {
     if (_stepsLeftToGo == 0) // just starting
     {
-      pinMode(_motorAMinus, OUTPUT); // for multiplexing, reconfigure as output while active
-      pinMode(_motorBMinus, OUTPUT); // as above
       _currentDirection = _direction;
       _stepsLeftToGo = _strokeSteps;
       _readyToRun = false;
       _isRunning = true;
+      // esp_timer_init();
+      // _lastStepStartTime = 0;
       _lastStepStartTime = micros();
-      _lastSliceStartTime = _lastStepStartTime;
     }
 
     _now = micros();
+    // _now = (uint32_t) esp_timer_get_time();
 
     // turn off current before end of step to reduce torque
     if (_stepInterval  - (_now - _lastStepStartTime) < _torqueInterval)
       release();
 
+
     // move only if the appropriate delay has passed:
     if ((_now - _lastStepStartTime) >= _stepInterval)
     {
-
       // remember when this step started
       _lastStepStartTime = _now;
-      _lastSliceStartTime = _lastStepStartTime;
 
       // increment or decrement the step number depending on direction
       if (_currentDirection)
@@ -170,12 +193,13 @@ bool StepperMRTO::run(void)
         {
           _currentStep = _stepsPerRevolution;
         }
-        _currentStep--; // TBD does this need to be moved up before the if?
+        _currentStep--; 
       }
+
       // decrement the steps left to go and test for done
       if (--_stepsLeftToGo == 0) // done with the stroke if zero
       {
-        release();                    // turn off the juice to reduce overheating
+        release();  // turn off the juice to reduce overheating
         // pinMode(_motorAMinus, INPUT); // for multiplexing, don't want this pin acting as a sink while other coils are active
         // pinMode(_motorBMinus, INPUT); // as above, done with these pins for now
         _isRunning = false;
