@@ -23,8 +23,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ToDo:
-1 Direction assignment not working from menu
-2 Missing display of current stepper parameters
 
   Pin assignments:
    01  TX0
@@ -55,6 +53,7 @@ ToDo:
    */
 
 #include <iostream>>
+#include <esp_timer.h>
 #include <Preferences.h>
 #include <PubSubClient.h>
 #include "WiFi.h"
@@ -65,7 +64,7 @@ ToDo:
 
 using namespace std;
 
-const char *version = "F.0";
+const char *version = "1.0";
 
 Preferences myPrefs;
 char *deviceSpace[] = {"d1", "d2", "d3", "d4"};
@@ -107,14 +106,17 @@ uint16_t const APlus1Pin = 12;
 uint16_t const AMinus1Pin = 13;
 uint16_t const BPlus1Pin = 14;
 uint16_t const BMinus1Pin = 15;
+
 uint16_t const APlus2Pin = 16;
 uint16_t const AMinus2Pin = 17;
 uint16_t const BPlus2Pin = 18;
 uint16_t const BMinus2Pin = 19;
+
 uint16_t const APlus3Pin = 21;
 uint16_t const AMinus3Pin = 22;
 uint16_t const BPlus3Pin = 23;
 uint16_t const BMinus3Pin = 25;
+
 uint16_t const APlus4Pin = 26;
 uint16_t const AMinus4Pin = 27;
 uint16_t const BPlus4Pin = 32;
@@ -128,7 +130,7 @@ StepperMRTO myStepper[] =
 
 // switch pins for manual control, these must have pullup resistors
 uint16_t const switchPin[4] = {34, 35, 36, 39};
-bool switchesAvailable = false; // change to true from menu if switch pins have pullups
+bool switchesAvailable = false; // change to true from menu iff switch pins have pullups
 
 bool returnToMenu = false; // for test actuation feature from menu
 
@@ -145,6 +147,9 @@ uint32_t lastFlashTime; // for flasher
 
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 
+uint32_t testTimer;
+uint32_t testCounter;
+
 /*****************************************************************************/
 void setup()
 {
@@ -153,12 +158,12 @@ void setup()
   Serial.begin(115200);
   pinMode(5, INPUT_PULLUP); // this is used for resetting Bluetooth
 
-  // start neoPixels and set to blue
+  // start neoPixels and set all to blue
   strip.begin();
-  red = strip.Color(100, 0, 0);
-  yellow = strip.Color(70, 30, 0);
-  green = strip.Color(0, 80, 0);
-  blue = strip.Color(0, 0, 160);
+  red = strip.gamma32(strip.ColorHSV(0, 200, 70));
+  yellow = strip.gamma32(strip.ColorHSV(65536 / 6, 200, 70));
+  green = strip.gamma32(strip.ColorHSV(65536 / 3, 200, 70));
+  blue = strip.gamma32(strip.ColorHSV(65536 * 2 / 3, 200, 70));
   for (int i = 0; i < NUM_DEVICES; i++)
     strip.setPixelColor(i, blue);
   strip.show();
@@ -349,6 +354,8 @@ void setupSubscriptions()
 /*****************************************************************************/
 void loop()
 {
+  // testCounter++;
+
   // this will reset the password to "IGNORE" and turn on Bluetooth
   // use this if Bluetooth has been disabled from the menu (to prevent hackers in the house)
   // or if password was forgotten
@@ -365,6 +372,7 @@ void loop()
   if (!client.connected())
   {
     connectMQTT();
+    BTSerial.println("client connection");
     setupSubscriptions();
   }
 
@@ -380,12 +388,12 @@ void loop()
   if (switchesAvailable)
     checkSwitches();
 
+  //  testTimer = micros();
   if (runSteppers() && returnToMenu) // runSteppers returns true at end of throw, check if throw was commanded from menu
   {
     returnToMenu = false; // we came here from the menu 'A' command, return to menu
     configure();
   }
-
 }
 
 /*****************************************************************************/
@@ -480,9 +488,9 @@ bool runSteppers() // returns true if a throw was completed, false otherwise
       {
         lastFlashTime = millis();
         if (flasher)
-        strip.setPixelColor(i, yellow);
+          strip.setPixelColor(i, yellow);
         else
-        strip.setPixelColor(i, 0);
+          strip.setPixelColor(i, 0);
         flasher = !flasher;
         strip.show();
       }
@@ -497,8 +505,8 @@ bool runSteppers() // returns true if a throw was completed, false otherwise
     {
       // the first one we find that is ready we set to run and then exit
       myStepper[i].run();
-      strip.setPixelColor(i, yellow);
-      strip.show();
+      // strip.setPixelColor(i, yellow);
+      // strip.show();
       break;
     }
   }
@@ -527,7 +535,7 @@ void showMenu()
   // BTSerial.println(" 'D' - Debug display on/off");
   BTSerial.println(" 'B' - Restart machine");
 
-  BTSerial.println("\n Enter 'R' to return to run mode \n (automatic after 30 sec of inactivity)");
+  BTSerial.println("\n Enter empty line to return to run mode \n (automatic after 30 sec of inactivity)");
 }
 
 /*****************************************************************************/
@@ -554,7 +562,7 @@ void configure()
       beenHereDoneThat = true;
     }
     else
-      BTSerial.println("\nMain menu\n Enter empty line to show menu, 'R' to exit");
+      BTSerial.println("\nMain menu\n Enter 'R' to review menu, empty line to exit");
 
     switch (getUpperChar(millis()))
     {
@@ -562,11 +570,11 @@ void configure()
     case 'T': // turnout names
       while (true)
       {
-        BTSerial.print("\nTurnout names\n Enter turnout number (1 - 4), blank line to exit: ");
+        BTSerial.print("\nTurnout names\n Enter turnout number (1 - 4), empty line to exit: ");
         _turnoutNumber = getNumber(0, NUM_DEVICES);
         if (_turnoutNumber <= 0)
           break;
-        BTSerial.print("\n Enter name, blank line to exit: ");
+        BTSerial.print("\n Enter name, empty line to exit: ");
         while (!BTSerial.available())
         {
         }
@@ -643,27 +651,8 @@ void configure()
       setMQTT();
       break;
 
-      // case 'C': // set mqtt channel
-      //   BTSerial.print("\nMQTT channel\n Current value: ");
-      //   BTSerial.println(mqttChannel);
-      //   BTSerial.print(" Enter new MQTT channel or blank line to exit: ");
-      //   while (!BTSerial.available())
-      //   {
-      //   }
-      //   myString = BTSerial.readString();
-      //   myString.trim();
-      //   if (myString.length() == 0)
-      //     break;
-      //   myPrefs.begin("general", false);
-      //   myPrefs.putString("mqttchannel", myString);
-      //   myPrefs.end();
-      //   BTSerial.print("\n Changed to ");
-      //   BTSerial.println(myString);
-      //   BTSerial.println("\n Reboot is required");
-      //   break;
-
     case 'N':
-      BTSerial.println("\nNode name\n Enter a name for this node (must be unique), blank to exit: ");
+      BTSerial.println("\nNode name\n Enter a name for this node (must be unique), empty line  to exit: ");
       while (!BTSerial.available())
       {
       }
@@ -683,7 +672,7 @@ void configure()
       changed = false;
       BTSerial.print("\n Current topic header: ");
       BTSerial.println(topicLeftEnd);
-      BTSerial.println("\n Enter new topic header or blank line to exit: ");
+      BTSerial.println("\n Enter new topic header or empty line to exit: ");
       while (!BTSerial.available())
       {
       }
@@ -702,7 +691,7 @@ void configure()
 
       BTSerial.print("\n Current feedback topic header: ");
       BTSerial.println(topicFeedbackLeftEnd);
-      BTSerial.println("\n Enter new feedback topic header or blank line to exit: ");
+      BTSerial.println("\n Enter new feedback topic header or empty line to exit: ");
       while (!BTSerial.available())
       {
       }
@@ -755,9 +744,8 @@ void configure()
       break;
 
     case 'R':
-      BTSerial.println("\nBack to run mode");
-      delay(1000);
-      return;
+      beenHereDoneThat = false;
+      break;
 
     case 'B': // reboot
       BTSerial.println("\nDevice will now be rebooted...");
@@ -766,8 +754,9 @@ void configure()
       break;
 
     default:
-      beenHereDoneThat = false;
-      break;
+      BTSerial.println("\nBack to run mode");
+      // delay(1000);
+      return;
     }
   }
 }
@@ -783,12 +772,16 @@ void stepperParameters()
   while (true)
   {
     BTSerial.println("\nConfigure Speed, Throw, Force and Direction\n");
-    BTSerial.println(" Enter S, T, F or D. Enter blank line to exit");
+    BTSerial.println(" Enter S, T, F or D. Enter empty line to exit");
 
     switch (getUpperChar(millis()))
     {
     case 'S':
       BTSerial.println("\n Speed (rpm, valid value 100 - 2000, default = 1000)");
+      showCurrentValues('S');
+      BTSerial.println("\n Enter 'C' to change or empty line  to exit");
+      if (getUpperChar(millis()) != 'C')
+        break;
       BTSerial.println(" Enter device (1 - 4) or 0 for all");
 
       devID = getNumber(0, 4);
@@ -820,6 +813,10 @@ void stepperParameters()
 
     case 'T':
       BTSerial.println("\n Throw (steps, valid value 200 - 800, default = 600, 1000 steps = 7mm)");
+      showCurrentValues('T');
+      BTSerial.println("\n Enter 'C' to change or empty line  to exit");
+      if (getUpperChar(millis()) != 'C')
+        break;
       BTSerial.println(" Enter device (1 - 4) or 0 for all");
 
       devID = getNumber(0, 4);
@@ -831,7 +828,7 @@ void stepperParameters()
         BTSerial.print("device ");
         BTSerial.println(devID);
       }
-      paramVal = getNumber(200, 800) / 10;
+      paramVal = getNumber(200, 800);
       if (devID == 0)
         for (int i = 0; i < NUM_DEVICES; i++)
         {
@@ -852,6 +849,10 @@ void stepperParameters()
     case 'F':
       BTSerial.println("\n Force (valid value 0 - 1500, default = 500)");
       BTSerial.println(" Larger values reduce force\n");
+      showCurrentValues('F');
+      BTSerial.println("\n Enter 'C' to change or empty line  to exit");
+      if (getUpperChar(millis()) != 'C')
+        break;
       BTSerial.println(" Enter device (1 - 4) or 0 for all");
 
       devID = getNumber(0, 4);
@@ -883,6 +884,10 @@ void stepperParameters()
 
     case 'D':
       BTSerial.println("\n Direction (0 or 1, 1 reverses the normal direction of throw\n");
+      showCurrentValues('D');
+      BTSerial.println("\n Enter 'C' to change or empty line  to exit");
+      if (getUpperChar(millis()) != 'C')
+        break;
       BTSerial.println(" Enter device (1 - 4) or 0 for all");
 
       devID = getNumber(0, 4);
@@ -901,14 +906,14 @@ void stepperParameters()
           myPrefs.begin(deviceSpace[i], false);
           myPrefs.putBool("reversed", paramBool);
           myPrefs.end();
-          myStepper[i].setReversed(paramVal);
+          myStepper[i].setReversed(paramBool);
         }
       else
       {
         myPrefs.begin(deviceSpace[devID - 1], false);
         myPrefs.putBool("reversed", paramBool);
         myPrefs.end();
-        myStepper[devID - 1].setReversed(paramVal);
+        myStepper[devID - 1].setReversed(paramBool);
       }
       break;
 
@@ -918,6 +923,39 @@ void stepperParameters()
   }
 }
 
+/*****************************************************************************/
+void showCurrentValues(char myChar)
+{
+
+  BTSerial.println(" Current values");
+  for (int i = 0; i < NUM_DEVICES; i++)
+  {
+    BTSerial.print("  Device ");
+    BTSerial.print(i + 1);
+    BTSerial.print("  ");
+    switch (myChar)
+    {
+    case 'S':
+      BTSerial.println(myStepper[i].getSpeed());
+      break;
+
+    case 'T':
+      BTSerial.println(myStepper[i].getStrokeSteps());
+      break;
+
+    case 'F':
+      BTSerial.println(myStepper[i].getTorqueLimit());
+      break;
+
+    case 'D':
+      BTSerial.println(myStepper[i].getReversed());
+      break;
+
+    default:
+      break;
+    }
+  }
+}
 /*****************************************************************************/
 void setCredentials()
 {
@@ -988,7 +1026,7 @@ char getUpperChar(uint32_t invokeTime)
     if (invokeTime > 0)
     {
       if (timeout(invokeTime))
-        return 'R'; // operator dozed off
+        return ' '; // operator dozed off
     }
 
     if (BTSerial.available() > 0)
@@ -1108,4 +1146,10 @@ void printMsg(char *msg)
 void printBinary(uint8_t binVal)
 {
   BTSerial.println(binVal, HEX);
+}
+
+/*****************************************************************************/
+void print32(uint32_t Val)
+{
+  BTSerial.println(Val);
 }
