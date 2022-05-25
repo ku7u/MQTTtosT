@@ -64,7 +64,7 @@ ToDo:
 
 using namespace std;
 
-const char *version = "1.0";
+const char *version = "2.0";
 
 Preferences myPrefs;
 char *deviceSpace[] = {"d1", "d2", "d3", "d4"};
@@ -170,6 +170,7 @@ void setup()
 
   // get the stored configuration values, defaults are the second parameter in the list
   myPrefs.begin("general");
+  switchesAvailable = myPrefs.getBool("switchesavailable", false);
   nodeName = myPrefs.getString("nodename", "MQTTtosNode");
   BTname = nodeName;
   BTpassword = myPrefs.getString("password", "IGNORE");
@@ -528,6 +529,7 @@ void showMenu()
   BTSerial.println(" 'W' - Set WiFi credentials");
   BTSerial.println(" 'M' - Set MQTT server IP address");
   BTSerial.println(" 'L' - Set left side of topic");
+  BTSerial.println(" 'Y' - Enable/Disable switches");
   BTSerial.println(" 'T' - Set turnout name(s)");
   BTSerial.println(" 'S' - Set stepper parameters");
   BTSerial.println(" 'A' - Actuate a stepper for testing");
@@ -709,6 +711,22 @@ void configure()
       }
       if (changed)
         BTSerial.println("\n Reboot is required");
+      break;
+
+    case 'Y': // enable/disable switches
+      BTSerial.print("\n Enable/Disable manual switches\n");
+      BTSerial.print(" Pullups must be installed for switches to work!\n");
+      BTSerial.print(" Enter 'E' or 'D', empty line to exit\n");
+      myChar = getUpperChar(millis());
+      if (myChar == 'E')
+        switchesAvailable = true;
+      else if (myChar == 'D')
+        switchesAvailable = false;
+      else
+        break;
+      myPrefs.begin("general", false);
+      myPrefs.putBool("switchesavailable", switchesAvailable);
+      myPrefs.end();
       break;
 
     case 'S': // stepper configuration
