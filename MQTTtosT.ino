@@ -161,7 +161,8 @@ void setup()
   // start neoPixels and set all to blue
   strip.begin();
   red = strip.gamma32(strip.ColorHSV(0, 200, 70));
-  yellow = strip.gamma32(strip.ColorHSV(65536 / 6, 200, 70));
+  // yellow = strip.gamma32(strip.ColorHSV((65536 / 6), 200, 70));
+  yellow = strip.gamma32(strip.ColorHSV((65536 / 6) - 1500, 255, 100));
   green = strip.gamma32(strip.ColorHSV(65536 / 3, 200, 70));
   blue = strip.gamma32(strip.ColorHSV(65536 * 2 / 3, 200, 70));
   for (int i = 0; i < NUM_DEVICES; i++)
