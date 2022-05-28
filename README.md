@@ -1,6 +1,6 @@
 # MQTTtosT
 ## Description
-This software provides a means to control track switches (turnouts) on a model railroad. It should be used in conjunction with JMRI software and an MQTT server although the system will work standalone. The software runs on an ESP32 36 pin devkit device.
+This software provides a means to control track switches (turnouts) on a model railroad. It should be used in conjunction with JMRI software and an MQTT server although the system will work standalone. The software runs on an ESP32 30 pin devkit device.
 
 The ESP32 device will control four micro stepper motors through four motor driver boards mounted on the mother board. The micro stepper actuators are extremely small, on the order of 3/4" square with a height of less than 1/4". They can be placed on the surface of the layout, under the turnout throw bar, and hidden with scenery materials. They will self adjust for throw in this application. 
 
