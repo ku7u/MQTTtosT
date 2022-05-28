@@ -12,7 +12,7 @@ Primary control of the turnout motors is by using MQTT over WiFi. The source of 
 
 The software will send turnout status data back to JMRI at the end of each commanded movement.
 
-A gerber file for the required motherboard PCB is included in this distribution. I can be sent as is to a PCB fabrication shop such as JLCPCB.
+A gerber file for the required motherboard PCB is included in this distribution. It can be sent as is to a PCB fabrication shop such as JLCPCB.
 
 ## Important considerations
 All configuration is done using the supplied menuing system via Bluetooth. A Bluetooth Serial app is required on a phone or tablet. I recommend BlueTooth Serial on Android by Kai Morich. Others I have tried all had issues. Connect your device to the ESP32 as soon as the software has been booted.
