@@ -64,7 +64,7 @@ ToDo:
 
 using namespace std;
 
-const char *version = "2.1.0";
+const char *version = "2.2.0";
 
 Preferences myPrefs;
 char *deviceSpace[] = {"d1", "d2", "d3", "d4"};
@@ -77,7 +77,6 @@ String wifiPassword;
 // mqtt
 String mqttServer;
 String mqttNode;
-String mqttChannel;
 String topicLeftEnd;
 String topicFeedbackLeftEnd;
 String turnoutTopic;
@@ -159,10 +158,10 @@ void setup()
   pinMode(5, INPUT_PULLUP); // this is used for resetting Bluetooth
 
   // start neoPixels and set all to blue
+  // neoPixels must be wired in order of devices, first nP is device 1
   strip.begin();
   red = strip.gamma32(strip.ColorHSV(0, 200, 70));
-  // yellow = strip.gamma32(strip.ColorHSV((65536 / 6), 200, 70));
-  yellow = strip.gamma32(strip.ColorHSV((65536 / 6) - 1500, 255, 100));
+  yellow = strip.gamma32(strip.ColorHSV((65536 / 6) - 1500, 255, 100)); // a little brighter and yellower
   green = strip.gamma32(strip.ColorHSV(65536 / 3, 200, 70));
   blue = strip.gamma32(strip.ColorHSV(65536 * 2 / 3, 200, 70));
   for (int i = 0; i < NUM_DEVICES; i++)
@@ -173,12 +172,11 @@ void setup()
   myPrefs.begin("general");
   switchesAvailable = myPrefs.getBool("switchesavailable", false);
   nodeName = myPrefs.getString("nodename", "MQTTtosNode");
-  BTname = nodeName;
-  BTpassword = myPrefs.getString("password", "IGNORE");
+  BTname = nodeName;                                    // share the node name with Bluetooth
+  BTpassword = myPrefs.getString("password", "IGNORE"); // treats IGNORE as if no password
   SSID = myPrefs.getString("SSID", "none");
   wifiPassword = myPrefs.getString("wifipassword", "none");
   mqttServer = myPrefs.getString("mqttserver", "none");
-  mqttChannel = myPrefs.getString("mqttchannel", "trains/");
   topicLeftEnd = myPrefs.getString("topicleftend", "trains/track/turnout/");
   topicFeedbackLeftEnd = myPrefs.getString("topicfeedbackleftend", "trains/track/sensor/turnout/");
   myPrefs.end();
@@ -197,8 +195,8 @@ void setup()
   strcpy(mqtt_server, mqttServer.c_str());
   uint8_t ip[4];
   sscanf(mqtt_server, "%u.%u.%u.%u", &ip[0], &ip[1], &ip[2], &ip[3]);
-  client.setServer(ip, 1883);
-  client.setKeepAlive(60);
+  client.setServer(ip, 1883); // 1883 is the default port on mosquitto server
+  client.setKeepAlive(60);    // this is probaably not necessary, just use the default
   client.setCallback(callback);
   connectMQTT();
 
@@ -220,8 +218,8 @@ void setup()
     myStepper[i].setStrokeSteps(myPrefs.getUShort("throw", NOMINAL_STROKE));
 
     // limit the torque, defaults to NOMINAL_TORQUE_INTERVAL
-    // this defines the maximum time in microseconds that current will be allowed to flow in each step
-    // the default is 1000, a larger number provides more torque but consumes more current
+    // this defines the time in microseconds that current current flow will be shortened in each step
+    // the default is 500, a smaller number provides more torque but consumes more current
     // at 1000 rpm the step length is 3000 ms for a 20 step/revolution motor
     myStepper[i].setTorqueLimit(myPrefs.getUShort("force", NOMINAL_TORQUE_INTERVAL));
 
@@ -229,6 +227,8 @@ void setup()
     // design assumes device is installed on the closed side of turnout and that turnout is closed
     // the first movement after startup will be to pull the throwbar thus throwing the track switch
     // setting reversed to true will set motion to the opposite of above as required if machine is located on diverging side
+    // as well, the device may need to be reversed depending on whether coil wires are reversed
+    // bottom line is to set the reversed parameter to make the device work as expected
     myStepper[i].setReversed(myPrefs.getBool("reversed", false));
     myPrefs.end();
   }
@@ -296,7 +296,7 @@ void connectMQTT()
 
   uint32_t now = millis();
 
-  // Loop until we're reconnected TBD change all Serial to BTSerial (maybe)
+  // Loop until we're reconnected
   while (!client.connect(mqtt_node))
   {
     pinMode(2, OUTPUT);
@@ -335,11 +335,11 @@ void connectMQTT()
 void setupSubscriptions()
 {
   char subscription[100];
-  // accept all <channel>/track/turnout/ topics
+  // accept all <topic left end>/<node>/<device> topics
   // they will be of the form trains/track/turnout/<JMRI system name> THROWN/CLOSED
   // JMRI system name must be nodename + "/" + device name
 
-  // feedback (not a subscription) is of the form trains/track/sensor/turnout/<JMRI system name> THROWN/CLOSED
+  // feedback (not a subscription) is of the form trains/track/sensor/turnout/<JMRI system name> ACTIVE/INACTIVE
 
   turnoutTopic = topicLeftEnd + nodeName + "/";
   turnoutFeedbackTopic = topicFeedbackLeftEnd + nodeName + "/";
@@ -434,6 +434,7 @@ void callback(char *topic, byte *message, unsigned int length)
 }
 
 /*****************************************************************************/
+// each push of a switch activaates the device to move in direction opposite to last commanded
 void checkSwitches()
 {
   for (int i = 0; i < NUM_DEVICES; i++)
@@ -459,9 +460,10 @@ void checkSwitches()
 }
 
 /*****************************************************************************/
+// looks for steppers that are ready to run and runs them, one at a time (to limit current)
+// this routine must be called repeatedly in the loop
 bool runSteppers() // returns true if a throw was completed, false otherwise
 {
-  // this routine must be called repeatedly in the loop
   bool throwComplete = false;
   String feedbackTopic;
 
@@ -520,6 +522,7 @@ bool runSteppers() // returns true if a throw was completed, false otherwise
 // displays the menu for user interaction for configuration or testing
 void showMenu()
 {
+  static bool beenDone;
   BTSerial.println(" ");
   BTSerial.print("\nTurnout Controller Main Menu for ");
   BTSerial.println(BTname);
@@ -538,6 +541,11 @@ void showMenu()
   // BTSerial.println(" 'D' - Debug display on/off");
   BTSerial.println(" 'B' - Restart machine");
 
+  if (!beenDone)
+  {
+    BTSerial.print("\n Menu choices are not case sensitive");
+    beenDone = true;
+  }
   BTSerial.println("\n Enter empty line to return to run mode \n (automatic after 30 sec of inactivity)");
 }
 
@@ -573,7 +581,7 @@ void configure()
     case 'T': // turnout names
       while (true)
       {
-        BTSerial.print("\nTurnout names\n Enter turnout number (1 - 4), empty line to exit: ");
+        BTSerial.print("\nTurnout naming menu\n Enter turnout number (1 - 4), empty line to exit: ");
         _turnoutNumber = getNumber(0, NUM_DEVICES);
         if (_turnoutNumber <= 0)
           break;
@@ -630,7 +638,7 @@ void configure()
     break;
 
     case 'X':
-      BTSerial.print("\nBluetooth credentials\n Enter password: ");
+      BTSerial.print("\n Enter new Bluetooth password, empty line to exit ");
       while (!BTSerial.available())
       {
       }
@@ -655,7 +663,7 @@ void configure()
       break;
 
     case 'N':
-      BTSerial.println("\nNode name\n Enter a name for this node (must be unique), empty line  to exit: ");
+      BTSerial.println("\n Enter a name for this node (must be unique), empty line  to exit: ");
       while (!BTSerial.available())
       {
       }
@@ -755,9 +763,9 @@ void configure()
       break;
 
     case 'D':
-      BTSerial.println("Turn debug display on ('Y') or off ('N') ");
+      BTSerial.println(" Turn debug display on ('Y') or off ('N') ");
       myChar = getUpperChar(30000);
-      BTSerial.println("Which detector (1-8)?");
+      BTSerial.println(" Which detector (1-8)?");
       devID = getNumber(1, 8);
       // bod[devID - 1].setDisplayDetect(myChar = 'Y');
       break;
@@ -773,7 +781,7 @@ void configure()
       break;
 
     default:
-      BTSerial.println("\nBack to run mode");
+      BTSerial.println("\nExiting to run mode");
       // delay(1000);
       return;
     }
@@ -781,8 +789,8 @@ void configure()
 }
 
 /*****************************************************************************/
+// configure all of the stepper parameters
 void stepperParameters()
-/*****************************************************************************/
 {
   uint16_t devID;
   uint16_t paramVal;
@@ -790,7 +798,7 @@ void stepperParameters()
 
   while (true)
   {
-    BTSerial.println("\nConfigure Speed, Throw, Force and Direction\n");
+    BTSerial.println("\nConfiguration menu for Speed, Throw, Force, Direction\n");
     BTSerial.println(" Enter S, T, F or D. Enter empty line to exit");
 
     switch (getUpperChar(millis()))
@@ -943,9 +951,9 @@ void stepperParameters()
 }
 
 /*****************************************************************************/
+// shows stepper current values for the parameter passed in
 void showCurrentValues(char myChar)
 {
-
   BTSerial.println(" Current values");
   for (int i = 0; i < NUM_DEVICES; i++)
   {
@@ -976,6 +984,7 @@ void showCurrentValues(char myChar)
   }
 }
 /*****************************************************************************/
+// configures wifi SSID and password
 void setCredentials()
 {
   String myString;
@@ -1013,6 +1022,7 @@ void setCredentials()
 }
 
 /*****************************************************************************/
+// configure the MQTT server ip address
 void setMQTT()
 {
   String myString;
@@ -1034,10 +1044,9 @@ void setMQTT()
 }
 
 /*****************************************************************************/
-// returns upper case character
+// gets one character and converts to upper case, clears input buffer of C/R and newline
 char getUpperChar(uint32_t invokeTime)
 {
-  // gets one character and converts to upper case, clears input buffer of C/R and newline
   char _myChar;
 
   while (true)
