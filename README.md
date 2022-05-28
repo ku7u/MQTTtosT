@@ -48,4 +48,8 @@ Motor driver board: https://www.amazon.com/gp/product/B08RMWTDLM/ref=ppx_yo_dt_b
 
 Terminal blocks: https://www.amazon.com/dp/B07B791NMQ?psc=1&ref=ppx_yo2ov_dt_b_product_details
 
-Pin headers: eBay item 122072149870
+neoPixel strip: https://www.amazon.com/dp/B01MG49QKD?psc=1&ref=ppx_yo2ov_dt_b_product_details
+
+Pin headers: https://www.amazon.com/dp/B07VP63Z78?psc=1&ref=ppx_yo2ov_dt_b_product_details
+
+Micro steppers: eBay item 122072149870
