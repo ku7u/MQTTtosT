@@ -38,3 +38,10 @@ The stepper motor characteristics may need to be modified from the default value
 
 ## Versioning
 Any change that affects operation increase the version number most significant digit. Any change that corrects an error will increase the version number middle digit. A change that does neither such as correcting a typo will increase the least significant digit.
+
+## Sources
+Possible sources for hardware...
+ESP32 dev board: https://www.amazon.com/gp/product/B08NW6YZ8W/ref=ppx_yo_dt_b_asin_title_o01_s00?ie=UTF8&th=1
+Motor driver board: https://www.amazon.com/gp/product/B08RMWTDLM/ref=ppx_yo_dt_b_asin_title_o01_s01?ie=UTF8&psc=1
+Terminal blocks: https://www.amazon.com/dp/B07B791NMQ?psc=1&ref=ppx_yo2ov_dt_b_product_details
+Pin headers: eBay item 122072149870
